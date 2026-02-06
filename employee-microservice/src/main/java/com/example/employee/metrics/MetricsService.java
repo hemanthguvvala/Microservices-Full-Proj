@@ -23,6 +23,7 @@ public class MetricsService {
     private final Counter employeeRetrievedCounter;
     private final Counter employeeNotFoundCounter;
     private final Counter employeeValidationErrorCounter;
+    private final Timer employeeOperationTimer;
     
     private final AtomicInteger activeEmployees = new AtomicInteger(0);
 

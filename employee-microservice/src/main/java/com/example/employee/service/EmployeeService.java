@@ -230,4 +230,54 @@ public class EmployeeService {
         }
         return "system";
     }
+    
+    // ========== Fallback Methods for Circuit Breaker ==========
+    
+    /**
+     * Fallback method when getAllEmployees with pagination fails
+     */
+    private Page<Employee> getAllEmployeesFallback(Pageable pageable, Throwable throwable) {
+        log.error("Circuit breaker activated for getAllEmployees (pageable). Reason: {}", throwable.getMessage());
+        return Page.empty(pageable);
+    }
+    
+    /**
+     * Fallback method when getAllEmployees list fails
+     */
+    private List<Employee> getAllEmployeesListFallback(Throwable throwable) {
+        log.error("Circuit breaker activated for getAllEmployeesList. Reason: {}", throwable.getMessage());
+        return List.of();
+    }
+    
+    /**
+     * Fallback method when getEmployeeById fails
+     */
+    private Employee getEmployeeByIdFallback(Long id, Throwable throwable) {
+        log.error("Circuit breaker activated for getEmployeeById (id: {}). Reason: {}", id, throwable.getMessage());
+        throw new ResourceNotFoundException("Employee", "id", id);
+    }
+    
+    /**
+     * Fallback method when createEmployee fails
+     */
+    private Employee createEmployeeFallback(Employee employee, Throwable throwable) {
+        log.error("Circuit breaker activated for createEmployee. Reason: {}", throwable.getMessage());
+        throw new RuntimeException("Service temporarily unavailable. Please try again later.");
+    }
+    
+    /**
+     * Fallback method when updateEmployee fails
+     */
+    private Employee updateEmployeeFallback(Long id, Employee employeeDetails, Throwable throwable) {
+        log.error("Circuit breaker activated for updateEmployee (id: {}). Reason: {}", id, throwable.getMessage());
+        throw new RuntimeException("Service temporarily unavailable. Please try again later.");
+    }
+    
+    /**
+     * Fallback method when deleteEmployee fails
+     */
+    private void deleteEmployeeFallback(Long id, Throwable throwable) {
+        log.error("Circuit breaker activated for deleteEmployee (id: {}). Reason: {}", id, throwable.getMessage());
+        throw new RuntimeException("Service temporarily unavailable. Please try again later.");
+    }
 }
