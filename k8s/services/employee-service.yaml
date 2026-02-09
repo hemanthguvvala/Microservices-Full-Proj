@@ -1,0 +1,221 @@
+# ─── Employee Microservice Deployment ─────────────────────────────────────────
+# Production-grade K8s deployment with:
+# - Liveness/Readiness/Startup probes (Spring Actuator)
+# - Resource requests/limits (required by HPA)
+# - Anti-affinity (spread across nodes)
+# - Graceful shutdown (preStop hook)
+# - ConfigMap + Secret injection
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: employee-service
+  namespace: employee-platform
+  labels:
+    app: employee-service
+    version: v1
+    app.kubernetes.io/part-of: employee-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: employee-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          # Allow 1 extra pod during update
+      maxUnavailable: 0    # Zero downtime — never kill old before new is ready
+  template:
+    metadata:
+      labels:
+        app: employee-service
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      serviceAccountName: employee-service-sa
+      terminationGracePeriodSeconds: 60
+
+      # Spread pods across nodes (anti-affinity)
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - employee-service
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: employee-service
+          image: employee-platform/employee-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+
+          # ── Environment from ConfigMap + Secrets ──────────────────
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: db-credentials
+            - secretRef:
+                name: jwt-secret
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "prod"
+            - name: SERVER_PORT
+              value: "8081"
+            - name: SPRING_DATASOURCE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: SPRING_DATASOURCE_URL
+            # Pod metadata as env vars (useful for logging/tracing)
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+
+          # ── Resource Management ──────────────────────────────────
+          # requests = guaranteed resources (scheduler uses this)
+          # limits = maximum resources (OOM kill if exceeded)
+          resources:
+            requests:
+              cpu: 250m        # 0.25 CPU cores
+              memory: 512Mi    # 512MB RAM
+            limits:
+              cpu: 1000m       # 1 CPU core max
+              memory: 1Gi      # 1GB RAM max
+
+          # ── Health Probes ────────────────────────────────────────
+          # Spring Boot Actuator endpoints:
+          # /actuator/health/liveness  → Is the app alive?
+          # /actuator/health/readiness → Can it serve traffic?
+
+          # Startup probe: Give JVM time to start (Spring Boot is slow)
+          # Check every 5s, fail after 30 attempts = 150s max startup
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+
+          # Liveness: Is the app in a broken state? Restart if fails 3x
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 15
+            failureThreshold: 3
+            timeoutSeconds: 5
+
+          # Readiness: Can the app handle traffic? Remove from LB if fails
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+
+          # ── Graceful Shutdown ────────────────────────────────────
+          lifecycle:
+            preStop:
+              exec:
+                # Wait for in-flight requests to complete
+                command: ["sh", "-c", "sleep 10"]
+
+---
+# ── Service (ClusterIP — internal) ────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: employee-service
+  namespace: employee-platform
+  labels:
+    app: employee-service
+spec:
+  type: ClusterIP
+  selector:
+    app: employee-service
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http
+      protocol: TCP
+
+---
+# ── Horizontal Pod Autoscaler ─────────────────────────────────────────────────
+# Scales pods based on CPU/memory usage
+# At MNCs: tied to CloudWatch/Datadog custom metrics too
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: employee-service-hpa
+  namespace: employee-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: employee-service
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70    # Scale up when CPU > 70%
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80    # Scale up when memory > 80%
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60   # Wait 60s before scaling up again
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60           # Add max 2 pods per minute
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait 5min before scaling down (prevent flapping)
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120          # Remove max 1 pod per 2min
+
+---
+# ── ServiceAccount ────────────────────────────────────────────────────────────
+# At AWS: annotated with IAM Role ARN for IRSA (IAM Roles for Service Accounts)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: employee-service-sa
+  namespace: employee-platform
+  annotations:
+    # AWS IRSA — attach IAM role to K8s service account
+    # eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/employee-service-role
+  labels:
+    app: employee-service

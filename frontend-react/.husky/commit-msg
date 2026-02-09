@@ -1,0 +1,14 @@
+#!/bin/sh
+# Husky commit-msg hook
+# Validates commit messages follow Conventional Commits standard
+#
+# Standard format: type(scope): description
+# Examples:
+#   feat(employees): add bulk import feature
+#   fix(auth): handle token expiration correctly
+#   refactor(api): extract common request handler
+#
+# Used by: Angular team at Google, Vue.js, Lerna, semantic-release
+# Why: Enables automatic changelog generation and semantic versioning
+
+npx --no -- commitlint --edit "$1"

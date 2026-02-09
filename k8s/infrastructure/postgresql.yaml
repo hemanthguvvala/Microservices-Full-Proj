@@ -1,0 +1,116 @@
+# ─── PostgreSQL StatefulSet ────────────────────────────────────────────────────
+# StatefulSet (NOT Deployment) because databases need:
+#   - Stable network identity (pod-0, pod-1)
+#   - Persistent storage that survives pod restarts
+#   - Ordered deployment/scaling
+#
+# PRODUCTION NOTE: Use AWS RDS / Azure Database for PostgreSQL instead.
+# This manifest is for dev/staging or K8s-native deployments.
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgresql
+  namespace: employee-platform
+  labels:
+    app: postgresql
+    app.kubernetes.io/part-of: employee-platform
+spec:
+  serviceName: postgresql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresql
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: postgresql
+          image: postgres:15-alpine
+          ports:
+            - name: tcp-postgresql
+              containerPort: 5432
+              protocol: TCP
+
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: "employee_db"
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - $(POSTGRES_USER)
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - $(POSTGRES_USER)
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+
+          volumeMounts:
+            - name: postgresql-data
+              mountPath: /var/lib/postgresql/data
+
+  # PersistentVolumeClaim template — creates PVC per replica
+  volumeClaimTemplates:
+    - metadata:
+        name: postgresql-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: gp3    # AWS EBS gp3 (or "standard" for minikube)
+        resources:
+          requests:
+            storage: 20Gi
+
+---
+# Headless Service (required by StatefulSet for stable DNS)
+# Each pod gets: postgresql-0.postgresql.employee-platform.svc.cluster.local
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql
+  namespace: employee-platform
+  labels:
+    app: postgresql
+spec:
+  type: ClusterIP
+  clusterIP: None    # Headless — direct pod DNS
+  selector:
+    app: postgresql
+  ports:
+    - name: tcp-postgresql
+      port: 5432
+      targetPort: tcp-postgresql
+      protocol: TCP

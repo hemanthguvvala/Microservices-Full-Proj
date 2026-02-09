@@ -1,0 +1,66 @@
+# ─── Production Environment Overlay ───────────────────────────────────────────
+# Production overrides:
+# - Higher replicas / resources
+# - Production-grade storage classes
+# - Strict network policies
+# - TLS enabled
+#
+# Usage: kubectl apply -k k8s/overlays/prod
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../
+
+patches:
+  # Production replicas
+  - target:
+      kind: Deployment
+      name: employee-service
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 3
+  - target:
+      kind: Deployment
+      name: payroll-service
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 3
+  - target:
+      kind: Deployment
+      name: api-gateway
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 3
+
+  # Higher resource limits for prod
+  - target:
+      kind: Deployment
+      name: employee-service
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: 500m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 1Gi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: 2000m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 2Gi
+
+configMapGenerator:
+  - name: app-config
+    behavior: merge
+    literals:
+      - SPRING_PROFILES_ACTIVE=prod
+      - LOG_LEVEL=WARN
+
+commonLabels:
+  environment: production

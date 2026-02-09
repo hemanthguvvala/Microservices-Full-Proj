@@ -1,0 +1,77 @@
+# ─── Dev Environment Overlay ──────────────────────────────────────────────────
+# Overrides base configuration for development:
+# - Fewer replicas
+# - Lower resource limits
+# - Dev-specific config
+#
+# Usage: kubectl apply -k k8s/overlays/dev
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../    # Reference base kustomization
+
+# Dev-specific patches
+patches:
+  # Reduce replicas for dev environment
+  - target:
+      kind: Deployment
+      name: employee-service
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: payroll-service
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: api-gateway
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+
+  # Lower resource limits for dev
+  - target:
+      kind: Deployment
+      name: employee-service
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: 100m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 256Mi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: 500m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 512Mi
+
+  # Disable HPA in dev
+  - target:
+      kind: HorizontalPodAutoscaler
+    patch: |
+      $patch: delete
+      apiVersion: autoscaling/v2
+      kind: HorizontalPodAutoscaler
+      metadata:
+        name: unused
+
+# Override config for dev
+configMapGenerator:
+  - name: app-config
+    behavior: merge
+    literals:
+      - SPRING_PROFILES_ACTIVE=dev
+      - LOG_LEVEL=DEBUG
+
+commonLabels:
+  environment: dev

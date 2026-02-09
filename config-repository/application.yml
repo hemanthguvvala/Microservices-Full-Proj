@@ -1,0 +1,29 @@
+# Common configuration for all services
+spring:
+  cloud:
+    loadbalancer:
+      ribbon:
+        enabled: false
+      
+# Common database pool settings
+  datasource:
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 20000
+
+# Common actuator settings
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+# Common logging
+logging:
+  level:
+    root: INFO
+    com.example: DEBUG

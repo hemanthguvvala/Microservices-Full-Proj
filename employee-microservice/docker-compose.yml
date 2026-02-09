@@ -44,9 +44,58 @@ services:
     volumes:
       - redis-data:/data
 
+  # MongoDB - For audit logs
+  mongodb:
+    image: mongo:7
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin
+      MONGO_INITDB_DATABASE: employee_audit_db
+    networks:
+      - employee-network
+    volumes:
+      - mongodb-data:/data/db
+
+  # Elasticsearch - For employee search
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    networks:
+      - employee-network
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+
+  # PostgreSQL Replica (for read operations)
+  postgres-replica:
+    image: postgres:14
+    container_name: postgres-replica
+    environment:
+      POSTGRES_DB: employeedb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    networks:
+      - employee-network
+    volumes:
+      - postgres-replica-data:/var/lib/postgresql/data
+
 networks:
   employee-network:
     driver: bridge
 
 volumes:
   redis-data:
+  mongodb-data:
+  elasticsearch-data:
+  postgres-replica-data:

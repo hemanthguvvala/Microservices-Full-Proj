@@ -1,0 +1,178 @@
+{
+  "dashboard": {
+    "title": "Employee Service - Overview Dashboard",
+    "tags": ["microservices", "employee-service", "spring-boot"],
+    "timezone": "browser",
+    "refresh": "10s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Request Rate (req/s)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "rate(http_server_requests_seconds_count{service=\"employee-service\"}[1m])",
+            "legendFormat": "{{method}} {{uri}} - {{status}}"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Average Response Time (ms)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "rate(http_server_requests_seconds_sum{service=\"employee-service\"}[1m]) / rate(http_server_requests_seconds_count{service=\"employee-service\"}[1m]) * 1000",
+            "legendFormat": "{{method}} {{uri}}"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Error Rate (%)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "sum(rate(http_server_requests_seconds_count{service=\"employee-service\",status=~\"5..\"}[1m])) / sum(rate(http_server_requests_seconds_count{service=\"employee-service\"}[1m])) * 100",
+            "legendFormat": "Error Rate"
+          }
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"type": "gt", "params": [5]},
+              "operator": {"type": "and"},
+              "query": {"params": ["A", "5m", "now"]},
+              "reducer": {"type": "avg"},
+              "type": "query"
+            }
+          ],
+          "name": "High Error Rate Alert"
+        }
+      },
+      {
+        "id": 4,
+        "title": "JVM Memory Usage",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "jvm_memory_used_bytes{service=\"employee-service\",area=\"heap\"}",
+            "legendFormat": "Heap Used"
+          },
+          {
+            "expr": "jvm_memory_max_bytes{service=\"employee-service\",area=\"heap\"}",
+            "legendFormat": "Heap Max"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Database Connection Pool",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "hikaricp_connections_active{service=\"employee-service\"}",
+            "legendFormat": "Active Connections"
+          },
+          {
+            "expr": "hikaricp_connections_idle{service=\"employee-service\"}",
+            "legendFormat": "Idle Connections"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Circuit Breaker Status",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+        "targets": [
+          {
+            "expr": "resilience4j_circuitbreaker_state{service=\"employee-service\"}",
+            "legendFormat": "{{name}} - {{state}}"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Kafka Message Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+        "targets": [
+          {
+            "expr": "rate(kafka_producer_record_send_total{service=\"employee-service\"}[1m])",
+            "legendFormat": "Messages Sent"
+          },
+          {
+            "expr": "rate(kafka_consumer_records_consumed_total{service=\"employee-service\"}[1m])",
+            "legendFormat": "Messages Consumed"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Outbox Events Pending",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+        "targets": [
+          {
+            "expr": "outbox_events_pending{service=\"employee-service\"}",
+            "legendFormat": "Pending Events"
+          }
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"type": "gt", "params": [100]},
+              "operator": {"type": "and"},
+              "query": {"params": ["A", "5m", "now"]},
+              "reducer": {"type": "avg"},
+              "type": "query"
+            }
+          ],
+          "name": "High Outbox Backlog"
+        }
+      },
+      {
+        "id": 9,
+        "title": "Active Saga Instances",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 32},
+        "targets": [
+          {
+            "expr": "saga_instances_active{service=\"employee-service\"}",
+            "legendFormat": "Active Sagas"
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Failed Saga Instances",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 32},
+        "targets": [
+          {
+            "expr": "saga_instances_failed{service=\"employee-service\"}",
+            "legendFormat": "Failed Sagas"
+          }
+        ]
+      },
+      {
+        "id": 11,
+        "title": "Cache Hit Rate (%)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 32},
+        "targets": [
+          {
+            "expr": "cache_gets{service=\"employee-service\",result=\"hit\"} / (cache_gets{service=\"employee-service\",result=\"hit\"} + cache_gets{service=\"employee-service\",result=\"miss\"}) * 100",
+            "legendFormat": "Cache Hit Rate"
+          }
+        ]
+      }
+    ]
+  }
+}

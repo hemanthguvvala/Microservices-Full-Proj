@@ -1,0 +1,70 @@
+# ─── Production Values Override ───────────────────────────────────────────────
+# Usage: helm upgrade employee-platform . -f values-prod.yaml
+
+global:
+  environment: production
+  imageRegistry: "123456789012.dkr.ecr.us-east-1.amazonaws.com"
+
+employeeService:
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  autoscaling:
+    minReplicas: 3
+    maxReplicas: 20
+  env:
+    SPRING_PROFILES_ACTIVE: prod
+
+payrollService:
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  autoscaling:
+    minReplicas: 3
+    maxReplicas: 15
+  env:
+    SPRING_PROFILES_ACTIVE: prod
+
+apiGateway:
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  autoscaling:
+    minReplicas: 3
+    maxReplicas: 10
+  env:
+    SPRING_PROFILES_ACTIVE: prod
+
+frontend:
+  replicaCount: 3
+
+# In production: use managed services instead of K8s-hosted databases
+postgresql:
+  enabled: false    # Use AWS RDS instead
+
+redis:
+  enabled: false    # Use AWS ElastiCache instead
+
+kafka:
+  enabled: false    # Use AWS MSK instead
+
+secrets:
+  database:
+    # In production: injected from AWS Secrets Manager via External Secrets Operator
+    username: ""
+    password: ""

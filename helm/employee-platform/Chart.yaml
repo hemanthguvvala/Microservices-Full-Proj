@@ -1,0 +1,42 @@
+# ─── Helm Chart Metadata ──────────────────────────────────────────────────────
+# Helm = Kubernetes package manager (like npm for K8s)
+# Interview insight: Helm charts are THE standard for deploying apps at MNCs
+#
+# Commands:
+#   helm install employee-platform ./helm/employee-platform
+#   helm upgrade employee-platform ./helm/employee-platform -f values-prod.yaml
+#   helm rollback employee-platform 1
+#   helm list
+
+apiVersion: v2
+name: employee-platform
+description: A Helm chart for the Employee Platform microservices
+type: application
+version: 1.0.0         # Chart version (incremented on chart changes)
+appVersion: "1.0.0"    # Application version
+
+keywords:
+  - microservices
+  - spring-boot
+  - react
+  - employee-management
+
+maintainers:
+  - name: Hemanth
+    email: hemanth@example.com
+
+dependencies:
+  # Use community charts for infrastructure in production
+  # helm dependency update ./helm/employee-platform
+  - name: postgresql
+    version: "13.2.24"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: "18.4.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+  - name: kafka
+    version: "26.4.2"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: kafka.enabled

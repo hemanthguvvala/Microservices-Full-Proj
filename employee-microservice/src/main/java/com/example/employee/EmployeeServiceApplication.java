@@ -1,9 +1,12 @@
 package com.example.employee;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
+import org.springframework.cloud.openfeign.EnableFeignClients;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.core.env.Environment;
 
 import java.net.InetAddress;
@@ -12,6 +15,9 @@ import java.net.UnknownHostException;
 @Slf4j
 @SpringBootApplication
 @EnableDiscoveryClient
+@EnableBatchProcessing
+@EnableScheduling
+@EnableFeignClients
 public class EmployeeServiceApplication {
 
     public static void main(String[] args) throws UnknownHostException {

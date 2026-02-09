@@ -1,0 +1,44 @@
+# ─── Shared ConfigMap ─────────────────────────────────────────────────────────
+# Non-secret configuration shared across services
+# In K8s, ConfigMaps REPLACE Spring Cloud Config Server for most use cases
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: employee-platform
+  labels:
+    app.kubernetes.io/part-of: employee-platform
+data:
+  # Service discovery — in K8s, DNS replaces Eureka
+  # service-name.namespace.svc.cluster.local
+  EUREKA_CLIENT_ENABLED: "false"
+  
+  # Database
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://postgresql.employee-platform.svc.cluster.local:5432/employeedb"
+  PAYROLL_DATASOURCE_URL: "jdbc:postgresql://postgresql.employee-platform.svc.cluster.local:5432/payrolldb"
+  
+  # Redis
+  SPRING_REDIS_HOST: "redis.employee-platform.svc.cluster.local"
+  SPRING_REDIS_PORT: "6379"
+  
+  # Kafka
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka.employee-platform.svc.cluster.local:9092"
+  
+  # MongoDB
+  SPRING_DATA_MONGODB_URI: "mongodb://mongodb.employee-platform.svc.cluster.local:27017/employeedb"
+  
+  # Elasticsearch
+  SPRING_ELASTICSEARCH_URIS: "http://elasticsearch.employee-platform.svc.cluster.local:9200"
+  
+  # Observability
+  MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: "http://zipkin.employee-platform.svc.cluster.local:9411/api/v2/spans"
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,prometheus,metrics"
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
+  
+  # Logging
+  LOGGING_LEVEL_ROOT: "INFO"
+  LOGGING_PATTERN_CONSOLE: "%d{ISO8601} [%thread] [%X{traceId},%X{spanId}] %-5level %logger{36} - %msg%n"
+  
+  # JVM
+  JAVA_OPTS: "-XX:+UseG1GC -XX:MaxRAMPercentage=75.0 -XX:+UseContainerSupport"

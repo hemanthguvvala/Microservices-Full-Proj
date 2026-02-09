@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Employee Service - WebSocket Demo</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .message-box {
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 10px 0;
+            max-height: 400px;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+        }
+        .message {
+            padding: 5px;
+            margin: 5px 0;
+            border-left: 3px solid #007bff;
+            background-color: white;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        .connect-btn {
+            background-color: #28a745;
+            color: white;
+            border: none;
+        }
+        .disconnect-btn {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Employee Service - Real-Time Updates</h1>
+    
+    <div id="status" class="status disconnected">
+        Status: Disconnected
+    </div>
+
+    <div>
+        <button id="connect" class="connect-btn" onclick="connect()">Connect</button>
+        <button id="disconnect" class="disconnect-btn" onclick="disconnect()" disabled>Disconnect</button>
+    </div>
+
+    <h2>Live Employee Events</h2>
+    <div id="messages" class="message-box">
+        <p>No messages yet. Connect to start receiving real-time updates.</p>
+    </div>
+
+    <h2>Test Actions</h2>
+    <div>
+        <p>Perform actions on employees using the API to see real-time updates here:</p>
+        <ul>
+            <li>Create: POST http://localhost:8081/api/employees</li>
+            <li>Update: PUT http://localhost:8081/api/employees/{id}</li>
+            <li>Delete: DELETE http://localhost:8081/api/employees/{id}</li>
+        </ul>
+    </div>
+
+    <script>
+        let stompClient = null;
+        const messagesDiv = document.getElementById('messages');
+        const statusDiv = document.getElementById('status');
+        const connectBtn = document.getElementById('connect');
+        const disconnectBtn = document.getElementById('disconnect');
+
+        function connect() {
+            const socket = new SockJS('http://localhost:8081/ws');
+            stompClient = Stomp.over(socket);
+            
+            stompClient.connect({}, function(frame) {
+                console.log('Connected: ' + frame);
+                updateStatus(true);
+                
+                // Subscribe to employee events
+                stompClient.subscribe('/topic/employees', function(message) {
+                    showMessage(JSON.parse(message.body), 'Employee Event');
+                });
+
+                // Subscribe to system notifications
+                stompClient.subscribe('/topic/system', function(message) {
+                    showMessage(message.body, 'System Notification');
+                });
+
+                showMessage('Successfully connected to WebSocket server!', 'Connection');
+            }, function(error) {
+                console.error('Connection error: ' + error);
+                updateStatus(false);
+                showMessage('Failed to connect: ' + error, 'Error');
+            });
+        }
+
+        function disconnect() {
+            if (stompClient !== null) {
+                stompClient.disconnect(function() {
+                    console.log('Disconnected');
+                    updateStatus(false);
+                    showMessage('Disconnected from server', 'Connection');
+                });
+            }
+        }
+
+        function updateStatus(connected) {
+            if (connected) {
+                statusDiv.className = 'status connected';
+                statusDiv.textContent = 'Status: Connected ✓';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+            } else {
+                statusDiv.className = 'status disconnected';
+                statusDiv.textContent = 'Status: Disconnected ✗';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            }
+        }
+
+        function showMessage(message, type) {
+            const messageElement = document.createElement('div');
+            messageElement.className = 'message';
+            
+            const timestamp = new Date().toLocaleTimeString();
+            const messageContent = typeof message === 'object' 
+                ? JSON.stringify(message, null, 2) 
+                : message;
+            
+            messageElement.innerHTML = `
+                <strong>[${timestamp}] ${type}:</strong><br>
+                <pre>${messageContent}</pre>
+            `;
+            
+            // Clear initial message
+            if (messagesDiv.querySelector('p')) {
+                messagesDiv.innerHTML = '';
+            }
+            
+            messagesDiv.insertBefore(messageElement, messagesDiv.firstChild);
+            
+            // Keep only last 20 messages
+            while (messagesDiv.children.length > 20) {
+                messagesDiv.removeChild(messagesDiv.lastChild);
+            }
+        }
+
+        // Auto-connect on page load (optional)
+        // connect();
+    </script>
+</body>
+</html>

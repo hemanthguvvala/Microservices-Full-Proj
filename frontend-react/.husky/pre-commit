@@ -1,0 +1,10 @@
+#!/bin/sh
+# Husky pre-commit hook
+# Runs lint-staged before every commit
+#
+# Used by: Google, Microsoft, Shopify, Stripe, Vercel, Netflix
+# Purpose: Prevent bad code from ever entering the repo
+#
+# This runs ONLY on staged files (fast, not full codebase)
+
+npx lint-staged

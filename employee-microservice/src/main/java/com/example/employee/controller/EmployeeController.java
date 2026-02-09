@@ -1,5 +1,6 @@
 package com.example.employee.controller;
 
+import com.example.employee.annotation.Auditable;
 import com.example.employee.dto.EmployeeCreateDTO;
 import com.example.employee.dto.EmployeeDTO;
 import com.example.employee.dto.EmployeeUpdateDTO;
@@ -15,7 +16,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -26,17 +26,30 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * Employee REST Controller — URL-based API versioning (/api/v1/).
+ * 
+ * Interview: "What API versioning strategies exist?"
+ *   1. URL path versioning:  /api/v1/employees  (most common — used here)
+ *   2. Header versioning:    Accept: application/vnd.company.v1+json
+ *   3. Query param:          /api/employees?version=1
+ *   4. Media type:           Content-Type with version
+ * 
+ * URL versioning is the most widely adopted due to simplicity and cacheability.
+ */
 @Slf4j
 @RestController
-@RequestMapping("/api/employees")
+@RequestMapping("/api/v1/employees")
 @Tag(name = "Employee Management", description = "APIs for managing employee data")
 public class EmployeeController {
 
-    @Autowired
-    private EmployeeService employeeService;
+    private final EmployeeService employeeService;
+    private final EmployeeMapper employeeMapper;
 
-    @Autowired
-    private EmployeeMapper employeeMapper;
+    public EmployeeController(EmployeeService employeeService, EmployeeMapper employeeMapper) {
+        this.employeeService = employeeService;
+        this.employeeMapper = employeeMapper;
+    }
 
     @Operation(summary = "Get all employees with pagination", 
                description = "Retrieve a paginated list of all employees with optional sorting")
@@ -122,6 +135,7 @@ public class EmployeeController {
         @ApiResponse(responseCode = "409", description = "Employee with this email already exists")
     })
     @PostMapping
+    @Auditable(action = "CREATE_EMPLOYEE", description = "Creating a new employee record")
     public ResponseEntity<EmployeeDTO> createEmployee(
             @Parameter(description = "Employee data", required = true) @Valid @RequestBody EmployeeCreateDTO createDTO) {
         log.info("POST /api/employees - Creating new employee with email: {}", createDTO.getEmail());
@@ -139,6 +153,7 @@ public class EmployeeController {
         @ApiResponse(responseCode = "409", description = "Email already taken by another employee")
     })
     @PutMapping("/{id}")
+    @Auditable(action = "UPDATE_EMPLOYEE", description = "Updating an existing employee")
     public ResponseEntity<EmployeeDTO> updateEmployee(
             @Parameter(description = "Employee ID", required = true) @PathVariable Long id, 
             @Parameter(description = "Updated employee data", required = true) @Valid @RequestBody EmployeeUpdateDTO updateDTO) {
@@ -156,6 +171,7 @@ public class EmployeeController {
         @ApiResponse(responseCode = "404", description = "Employee not found")
     })
     @DeleteMapping("/{id}")
+    @Auditable(action = "DELETE_EMPLOYEE", description = "Removing an employee from the system")
     public ResponseEntity<Void> deleteEmployee(
             @Parameter(description = "Employee ID", required = true) @PathVariable Long id) {
         log.info("DELETE /api/employees/{} - Deleting employee", id);

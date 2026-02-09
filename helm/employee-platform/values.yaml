@@ -1,0 +1,188 @@
+# ─── Helm Values (Default / Development) ─────────────────────────────────────
+# Override with: helm install -f values-prod.yaml employee-platform .
+#
+# Interview insight: values.yaml is how you parameterize K8s deployments
+# across environments (dev/staging/prod) without duplicating manifests
+
+# ── Global Settings ───────────────────────────────────────────────────────────
+global:
+  namespace: employee-platform
+  environment: dev
+  imagePullPolicy: IfNotPresent
+  imageRegistry: ""    # Set to ECR: 123456789012.dkr.ecr.us-east-1.amazonaws.com
+  storageClass: gp3
+
+# ── Employee Service ──────────────────────────────────────────────────────────
+employeeService:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: employee-platform/employee-service
+    tag: latest
+  service:
+    type: ClusterIP
+    port: 8081
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilization: 70
+    targetMemoryUtilization: 80
+  probes:
+    liveness:
+      path: /actuator/health/liveness
+      initialDelaySeconds: 30
+      periodSeconds: 15
+    readiness:
+      path: /actuator/health/readiness
+      initialDelaySeconds: 15
+      periodSeconds: 10
+  env:
+    SPRING_PROFILES_ACTIVE: dev
+    SERVER_PORT: "8081"
+
+# ── Payroll Service ───────────────────────────────────────────────────────────
+payrollService:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: employee-platform/payroll-service
+    tag: latest
+  service:
+    type: ClusterIP
+    port: 8083
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilization: 70
+  env:
+    SPRING_PROFILES_ACTIVE: dev
+    SERVER_PORT: "8083"
+
+# ── API Gateway ───────────────────────────────────────────────────────────────
+apiGateway:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: employee-platform/api-gateway
+    tag: latest
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    requests:
+      cpu: 200m
+      memory: 384Mi
+    limits:
+      cpu: 500m
+      memory: 768Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilization: 70
+  env:
+    SPRING_PROFILES_ACTIVE: dev
+    SERVER_PORT: "8080"
+
+# ── Frontend ──────────────────────────────────────────────────────────────────
+frontend:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: employee-platform/frontend
+    tag: latest
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ── Ingress ───────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: employee-platform.example.com
+      paths:
+        - path: /
+          service: frontend
+          port: 80
+    - host: api.employee-platform.example.com
+      paths:
+        - path: /api
+          service: api-gateway
+          port: 8080
+  tls:
+    - secretName: employee-platform-tls
+      hosts:
+        - employee-platform.example.com
+        - api.employee-platform.example.com
+
+# ── Infrastructure (use Bitnami charts in production) ─────────────────────────
+postgresql:
+  enabled: true
+  auth:
+    username: employee_user
+    password: changeme
+    database: employee_db
+  primary:
+    persistence:
+      size: 20Gi
+      storageClass: gp3
+
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      size: 5Gi
+
+kafka:
+  enabled: true
+  listeners:
+    client:
+      protocol: PLAINTEXT
+  controller:
+    replicaCount: 1
+
+# ── Monitoring ────────────────────────────────────────────────────────────────
+monitoring:
+  prometheus:
+    enabled: true
+  grafana:
+    enabled: true
+    adminPassword: admin
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+secrets:
+  database:
+    username: employee_user
+    password: changeme
+  jwt:
+    secret: your-jwt-secret-key-change-in-production

@@ -2,6 +2,7 @@ package com.example.employee.config;
 
 import com.example.employee.security.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -16,7 +17,22 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.Arrays;
+import java.util.List;
+
+/**
+ * Security Configuration — JWT + CORS + Method Security.
+ * 
+ * Interview Insight:
+ *   "How do you configure CORS in a Spring Boot microservice?"
+ *   → "Define a CorsConfigurationSource bean with allowed origins, methods,
+ *      and headers. Then enable it in the SecurityFilterChain via .cors().
+ *      Externalize allowed-origins via @Value for different environments."
+ */
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
@@ -25,6 +41,9 @@ public class SecurityConfig {
     
     private final UserDetailsService userDetailsService;
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+
+    @Value("${app.cors.allowed-origins:http://localhost:3000,http://localhost:5173}")
+    private String allowedOrigins;
     
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -43,19 +62,47 @@ public class SecurityConfig {
     public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
         return authConfig.getAuthenticationManager();
     }
+
+    /**
+     * CORS Configuration — Allows frontend origins to access the API.
+     * 
+     * Interview: "What is CORS and why is it needed?"
+     *   → Cross-Origin Resource Sharing. Browsers block requests from
+     *     different origins by default (Same-Origin Policy). CORS headers
+     *     tell the browser which origins are allowed to access the API.
+     *     Without it, React (localhost:3000) can't call Spring (localhost:8081).
+     */
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(Arrays.asList(allowedOrigins.split(",")));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
+        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Correlation-ID"));
+        configuration.setExposedHeaders(List.of("X-Correlation-ID"));
+        configuration.setAllowCredentials(true);
+        configuration.setMaxAge(3600L); // Pre-flight cache duration
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
+    }
     
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 // Public endpoints
                 .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/api/v1/auth/**").permitAll()
                 .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/api-docs/**").permitAll()
                 .requestMatchers("/h2-console/**").permitAll()
                 .requestMatchers("/actuator/**").permitAll()
-                // Employee endpoints - require authentication
+                .requestMatchers("/ws/**").permitAll()
+                // Employee endpoints - require authentication (both versioned and non-versioned)
+                .requestMatchers("/api/v1/employees/**").authenticated()
                 .requestMatchers("/api/employees/**").authenticated()
                 // All other requests require authentication
                 .anyRequest().authenticated()
@@ -63,7 +110,7 @@ public class SecurityConfig {
             .authenticationProvider(authenticationProvider())
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         
-        // For H2 Console
+        // For H2 Console (dev only)
         http.headers(headers -> headers.frameOptions(frame -> frame.disable()));
         
         return http.build();

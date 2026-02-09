@@ -1,0 +1,21 @@
+# Employee Service Configuration
+server:
+  port: 8081
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/employeedb
+    username: postgres
+    password: postgres
+  
+  cache:
+    type: redis
+  
+  kafka:
+    bootstrap-servers: localhost:9092
+    
+# Employee Service specific settings
+employee:
+  service:
+    max-query-results: 1000
+    cache-ttl: 3600

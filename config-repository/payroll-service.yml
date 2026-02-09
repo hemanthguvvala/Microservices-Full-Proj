@@ -1,0 +1,21 @@
+# Payroll Service Configuration
+server:
+  port: 8083
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/payrolldb
+    username: postgres
+    password: postgres
+  
+  cache:
+    type: redis
+  
+  kafka:
+    bootstrap-servers: localhost:9092
+
+# Payroll Service specific settings
+payroll:
+  service:
+    processing-day: 25
+    tax-rate: 0.20

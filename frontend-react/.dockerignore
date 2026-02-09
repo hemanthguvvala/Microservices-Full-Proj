@@ -1,0 +1,15 @@
+node_modules
+dist
+build
+.git
+.github
+.storybook
+e2e
+*.md
+*.log
+.env*
+.vscode
+coverage
+playwright-report
+test-results
+.husky

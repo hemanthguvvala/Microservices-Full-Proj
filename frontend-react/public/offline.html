@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Offline - Employee Management System</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+        'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+        sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      background: white;
+      border-radius: 20px;
+      padding: 60px 40px;
+      max-width: 500px;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+
+    .icon {
+      width: 120px;
+      height: 120px;
+      margin: 0 auto 30px;
+      background: #FEF3C7;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 60px;
+    }
+
+    h1 {
+      font-size: 32px;
+      color: #1F2937;
+      margin-bottom: 16px;
+      font-weight: 700;
+    }
+
+    p {
+      font-size: 18px;
+      color: #6B7280;
+      line-height: 1.6;
+      margin-bottom: 32px;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      background: #FEE2E2;
+      color: #DC2626;
+      border-radius: 50px;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 32px;
+    }
+
+    .status.online {
+      background: #D1FAE5;
+      color: #059669;
+    }
+
+    .indicator {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: currentColor;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.5;
+      }
+    }
+
+    button {
+      background: #3B82F6;
+      color: white;
+      border: none;
+      padding: 16px 32px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);
+    }
+
+    button:hover {
+      background: #2563EB;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(59, 130, 246, 0.4);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    button:disabled {
+      background: #9CA3AF;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .tips {
+      margin-top: 40px;
+      padding-top: 32px;
+      border-top: 1px solid #E5E7EB;
+    }
+
+    .tips h3 {
+      font-size: 16px;
+      color: #374151;
+      margin-bottom: 16px;
+      font-weight: 600;
+    }
+
+    .tips ul {
+      text-align: left;
+      list-style: none;
+    }
+
+    .tips li {
+      font-size: 14px;
+      color: #6B7280;
+      margin-bottom: 12px;
+      padding-left: 24px;
+      position: relative;
+    }
+
+    .tips li:before {
+      content: "•";
+      position: absolute;
+      left: 8px;
+      color: #3B82F6;
+      font-weight: bold;
+    }
+
+    @media (max-width: 640px) {
+      .container {
+        padding: 40px 24px;
+      }
+
+      h1 {
+        font-size: 24px;
+      }
+
+      p {
+        font-size: 16px;
+      }
+
+      .icon {
+        width: 100px;
+        height: 100px;
+        font-size: 50px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">📡</div>
+    
+    <div class="status" id="status">
+      <span class="indicator"></span>
+      <span id="statusText">Offline</span>
+    </div>
+
+    <h1>You're Offline</h1>
+    <p>
+      It looks like you've lost your internet connection. 
+      Please check your network settings and try again.
+    </p>
+
+    <button id="retryButton" onclick="retry()">
+      🔄 Try Again
+    </button>
+
+    <div class="tips">
+      <h3>While you're offline:</h3>
+      <ul>
+        <li>Check your WiFi or mobile data connection</li>
+        <li>Make sure airplane mode is off</li>
+        <li>Try moving to a location with better signal</li>
+        <li>Some cached content may still be available</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById('status')
+    const statusTextEl = document.getElementById('statusText')
+    const retryButton = document.getElementById('retryButton')
+
+    // Check online status
+    function updateStatus() {
+      const isOnline = navigator.onLine
+
+      if (isOnline) {
+        statusEl.className = 'status online'
+        statusTextEl.textContent = 'Back Online!'
+        retryButton.disabled = false
+        
+        // Auto-reload when back online
+        setTimeout(() => {
+          window.location.href = '/'
+        }, 1000)
+      } else {
+        statusEl.className = 'status'
+        statusTextEl.textContent = 'Offline'
+        retryButton.disabled = false
+      }
+    }
+
+    // Listen for online/offline events
+    window.addEventListener('online', updateStatus)
+    window.addEventListener('offline', updateStatus)
+
+    // Retry function
+    function retry() {
+      if (navigator.onLine) {
+        window.location.href = '/'
+      } else {
+        retryButton.disabled = true
+        retryButton.textContent = 'Still Offline...'
+        
+        setTimeout(() => {
+          retryButton.disabled = false
+          retryButton.textContent = '🔄 Try Again'
+        }, 2000)
+      }
+    }
+
+    // Check status on load
+    updateStatus()
+
+    // Periodic connection check
+    setInterval(async () => {
+      try {
+        const response = await fetch('/', { 
+          method: 'HEAD',
+          cache: 'no-cache'
+        })
+        
+        if (response.ok) {
+          updateStatus()
+        }
+      } catch (error) {
+        // Still offline
+      }
+    }, 5000)
+  </script>
+</body>
+</html>

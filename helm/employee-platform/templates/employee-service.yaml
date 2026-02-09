@@ -1,0 +1,141 @@
+{{/*
+Templatized Deployment + Service for Employee Service.
+This is what makes Helm powerful — same template, different values per environment.
+*/}}
+{{- if .Values.employeeService.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: employee-service
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "employee-platform.labels" . | nindent 4 }}
+    app: employee-service
+spec:
+  replicas: {{ .Values.employeeService.replicaCount }}
+  selector:
+    matchLabels:
+      app: employee-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: employee-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.employeeService.service.port }}"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      serviceAccountName: employee-service-sa
+      terminationGracePeriodSeconds: 60
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - employee-service
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: employee-service
+          image: {{ include "employee-platform.image" (dict "global" .Values.global "image" .Values.employeeService.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.employeeService.service.port }}
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: db-credentials
+            - secretRef:
+                name: jwt-secret
+          env:
+            {{- range $key, $value := .Values.employeeService.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            {{- toYaml .Values.employeeService.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.employeeService.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.employeeService.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.employeeService.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.employeeService.probes.liveness.periodSeconds }}
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.employeeService.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.employeeService.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.employeeService.probes.readiness.periodSeconds }}
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 10"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: employee-service
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: employee-service
+spec:
+  type: {{ .Values.employeeService.service.type }}
+  selector:
+    app: employee-service
+  ports:
+    - name: http
+      port: {{ .Values.employeeService.service.port }}
+      targetPort: http
+---
+{{- if .Values.employeeService.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: employee-service-hpa
+  namespace: {{ .Values.global.namespace }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: employee-service
+  minReplicas: {{ .Values.employeeService.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.employeeService.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.employeeService.autoscaling.targetCPUUtilization }}
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: employee-service-sa
+  namespace: {{ .Values.global.namespace }}
+{{- end }}

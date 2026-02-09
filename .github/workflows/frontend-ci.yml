@@ -1,0 +1,290 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# CI/CD Pipeline — Frontend
+#
+# Used by: Every MNC on GitHub (Netflix, Shopify, Stripe, Vercel, Meta OSS)
+#
+# This pipeline runs on every pull request and merge to main.
+# It enforces code quality gates BEFORE code reaches production.
+#
+# Flow:
+# PR → Lint → Type-check → Unit Tests → E2E Tests → Build → Deploy Preview
+# Merge to main → All above + Deploy to Production + Sentry Release
+# ═══════════════════════════════════════════════════════════════════════════
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'frontend-react/**'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'frontend-react/**'
+
+# Cancel in-progress runs on same PR (saves CI minutes — critical at scale)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  WORKING_DIR: ./frontend-react
+
+defaults:
+  run:
+    working-directory: ./frontend-react
+
+jobs:
+  # ─── Quality Gate: Lint + Type Check ───────────────────────────────────
+  quality:
+    name: 'Quality Gate'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend-react/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Type check (TypeScript)
+        run: npx tsc --noEmit
+
+      - name: Check formatting (Prettier)
+        run: npx prettier --check "src/**/*.{ts,tsx,css}"
+
+  # ─── Unit & Integration Tests ──────────────────────────────────────────
+  unit-tests:
+    name: 'Unit Tests'
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend-react/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npm run test:coverage
+
+      - name: Check coverage thresholds
+        run: |
+          # Fail if coverage drops below 80% (standard MNC threshold)
+          npx jest --coverage --coverageReporters=json-summary
+          node -e "
+            const coverage = require('./coverage/coverage-summary.json');
+            const total = coverage.total;
+            const pct = total.lines.pct;
+            if (pct < 80) {
+              console.error('Coverage is ' + pct + '%, minimum is 80%');
+              process.exit(1);
+            }
+            console.log('Coverage: ' + pct + '% ✅');
+          "
+
+      # Upload coverage to Codecov (used by thousands of OSS & MNC projects)
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          directory: frontend-react/coverage
+          flags: frontend-unit
+          fail_ci_if_error: false
+
+  # ─── E2E Tests (Playwright) ────────────────────────────────────────────
+  e2e-tests:
+    name: 'E2E Tests (${{ matrix.project }})'
+    needs: quality
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend-react/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps ${{ matrix.project }}
+
+      - name: Run E2E tests
+        run: npx playwright test --project=${{ matrix.project }}
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-${{ matrix.project }}
+          path: frontend-react/playwright-report/
+          retention-days: 7
+
+      - name: Upload trace (on failure)
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-trace-${{ matrix.project }}
+          path: frontend-react/test-results/
+          retention-days: 7
+
+  # ─── Build ────────────────────────────────────────────────────────────
+  build:
+    name: 'Build'
+    needs: [unit-tests, e2e-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend-react/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build production bundle
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.example.com' }}
+          VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          VITE_GOOGLE_ANALYTICS_ID: ${{ vars.GA_ID }}
+          VITE_APP_VERSION: ${{ github.sha }}
+          VITE_ENVIRONMENT: production
+
+      - name: Analyze bundle size
+        run: |
+          echo "📦 Bundle size analysis:"
+          du -sh dist/
+          echo ""
+          echo "Asset breakdown:"
+          find dist/assets -type f | while read f; do
+            size=$(du -h "$f" | cut -f1)
+            echo "  $size  $(basename $f)"
+          done
+
+      # Upload build artifact for deployment jobs
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend-react/dist/
+          retention-days: 3
+
+  # ─── Deploy to Staging (on develop branch) ──────────────────────────
+  deploy-staging:
+    name: 'Deploy to Staging'
+    needs: build
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.example.com
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: dist
+
+      - name: Deploy to staging
+        run: echo "Deploy to staging environment"
+        # Real deployment: Vercel, Netlify, AWS S3 + CloudFront, Azure Static Web Apps
+
+  # ─── Deploy to Production (on main branch) ─────────────────────────
+  deploy-production:
+    name: 'Deploy to Production'
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://app.example.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: dist
+
+      - name: Deploy to production
+        run: echo "Deploy to production"
+
+      # Create Sentry release (standard at MNCs for error tracking per release)
+      - name: Create Sentry Release
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+        with:
+          environment: production
+          sourcemaps: dist/assets
+          version: ${{ github.sha }}
+
+  # ─── Lighthouse Performance Audit ──────────────────────────────────
+  lighthouse:
+    name: 'Lighthouse Audit'
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lighthouse CI
+        uses: treosh/lighthouse-ci-action@v11
+        with:
+          urls: |
+            https://staging.example.com
+            https://staging.example.com/login
+            https://staging.example.com/employees
+          budgetPath: frontend-react/lighthouse-budget.json
+          uploadArtifacts: true
+
+  # ─── Dependency Security Audit ─────────────────────────────────────
+  security:
+    name: 'Security Audit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Audit dependencies
+        working-directory: frontend-react
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+      - name: Check for known vulnerabilities
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --file=frontend-react/package.json

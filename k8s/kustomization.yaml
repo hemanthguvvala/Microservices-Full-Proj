@@ -1,0 +1,45 @@
+# ─── Kustomize Base Configuration ─────────────────────────────────────────────
+# Kustomize = template-free customization of K8s manifests
+# Usage:
+#   kubectl apply -k k8s/              # Apply base
+#   kubectl apply -k k8s/overlays/dev  # Apply dev overlay
+#
+# Interview insight: Kustomize is built into kubectl (no extra tools needed)
+# Helm = templates with Go templating, Kustomize = patches/overlays
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: employee-platform
+
+# All resources managed by this kustomization
+resources:
+  # Base
+  - base/namespace.yaml
+  - base/configmap.yaml
+  - base/secrets.yaml
+  - base/ingress.yaml
+
+  # Microservices
+  - services/employee-service.yaml
+  - services/payroll-service.yaml
+  - services/api-gateway.yaml
+  - services/frontend.yaml
+
+  # Infrastructure
+  - infrastructure/postgresql.yaml
+  - infrastructure/redis.yaml
+  - infrastructure/kafka.yaml
+  - infrastructure/mongodb-elasticsearch.yaml
+
+  # Monitoring
+  - monitoring/prometheus-grafana.yaml
+
+# Common labels applied to ALL resources
+commonLabels:
+  managed-by: kustomize
+  team: platform-engineering
+
+# Common annotations
+commonAnnotations:
+  contact: platform-team@example.com

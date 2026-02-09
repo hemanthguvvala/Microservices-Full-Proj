@@ -1,0 +1,208 @@
+# ─── NGINX Ingress Controller Configuration ──────────────────────────────────
+# Ingress = L7 load balancer (HTTP/HTTPS routing)
+# In AWS: Creates an ALB or NLB automatically via aws-load-balancer-controller
+#
+# Traffic flow:
+#   Internet → ALB/NLB → Ingress Controller → ClusterIP Services → Pods
+#
+# Interview insight: Ingress replaces traditional reverse proxy (NGINX standalone)
+# and provides SSL termination, path-based routing, rate limiting, etc.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: employee-platform-ingress
+  namespace: employee-platform
+  labels:
+    app.kubernetes.io/part-of: employee-platform
+  annotations:
+    # NGINX Ingress Controller annotations
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+
+    # Rate limiting (per IP)
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "5"
+
+    # CORS
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://employee-platform.example.com"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "Authorization, Content-Type"
+
+    # AWS ALB annotations (use these if using aws-load-balancer-controller instead of NGINX)
+    # alb.ingress.kubernetes.io/scheme: internet-facing
+    # alb.ingress.kubernetes.io/target-type: ip
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:123456789012:certificate/xxx
+    # alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    # alb.ingress.kubernetes.io/healthcheck-path: /actuator/health
+
+    # cert-manager for automatic TLS certificates
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - employee-platform.example.com
+        - api.employee-platform.example.com
+      secretName: employee-platform-tls    # Auto-created by cert-manager
+
+  rules:
+    # ── API traffic → API Gateway ───────────────────────────────
+    - host: api.employee-platform.example.com
+      http:
+        paths:
+          - path: /api/employees(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 8080
+          - path: /api/payroll(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 8080
+          # Health check endpoint (bypasses gateway)
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 8080
+
+    # ── Frontend traffic → React SPA ────────────────────────────
+    - host: employee-platform.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+
+---
+# ─── Network Policies ────────────────────────────────────────────────────────
+# Restrict pod-to-pod traffic (Zero Trust networking)
+# Interview insight: Network Policies are like firewall rules for pods
+
+# Only API Gateway can talk to microservices
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-to-services
+  namespace: employee-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: employee-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api-gateway
+      ports:
+        - protocol: TCP
+          port: 8081
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-to-payroll
+  namespace: employee-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: payroll-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api-gateway
+        - podSelector:
+            matchLabels:
+              app: employee-service   # Saga pattern: employee → payroll
+      ports:
+        - protocol: TCP
+          port: 8083
+
+---
+# Only microservices can talk to databases
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: restrict-database-access
+  namespace: employee-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: postgresql
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - employee-service
+                  - payroll-service
+      ports:
+        - protocol: TCP
+          port: 5432
+
+---
+# ── Pod Disruption Budget ─────────────────────────────────────────────────────
+# Ensures minimum availability during voluntary disruptions
+# (node drain, cluster upgrades, spot instance reclamation)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: employee-service-pdb
+  namespace: employee-platform
+spec:
+  minAvailable: 1    # At least 1 pod must be running at all times
+  selector:
+    matchLabels:
+      app: employee-service
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payroll-service-pdb
+  namespace: employee-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: payroll-service
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-gateway-pdb
+  namespace: employee-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: api-gateway

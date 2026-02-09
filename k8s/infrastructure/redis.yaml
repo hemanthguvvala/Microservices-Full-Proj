@@ -1,0 +1,81 @@
+# ─── Redis Deployment ─────────────────────────────────────────────────────────
+# Used for: caching, session storage, rate limiting
+# PRODUCTION: Use AWS ElastiCache / Azure Cache for Redis
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: employee-platform
+  labels:
+    app: redis
+    app.kubernetes.io/part-of: employee-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - name: tcp-redis
+              containerPort: 6379
+              protocol: TCP
+          command:
+            - redis-server
+            - "--maxmemory"
+            - "256mb"
+            - "--maxmemory-policy"
+            - "allkeys-lru"     # Evict least recently used keys
+            - "--appendonly"
+            - "yes"             # Enable AOF persistence
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 15
+            failureThreshold: 3
+
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 10
+            failureThreshold: 3
+
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+      volumes:
+        - name: redis-data
+          emptyDir: {}    # Non-persistent for dev. Use PVC for prod.
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: employee-platform
+  labels:
+    app: redis
+spec:
+  type: ClusterIP
+  selector:
+    app: redis
+  ports:
+    - name: tcp-redis
+      port: 6379
+      targetPort: tcp-redis
+      protocol: TCP
