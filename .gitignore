@@ -23,6 +23,10 @@ dist/
 build/
 .cache/
 
+# ── Angular ──
+.angular/
+*.tsbuildinfo
+
 # ── IDE / Editors ──
 .idea/
 *.iml
