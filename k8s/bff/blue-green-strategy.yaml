@@ -1,0 +1,183 @@
+# ═══════════════════════════════════════════════════════════════
+# Blue-Green Deployment Strategy
+# ═══════════════════════════════════════════════════════════════
+# How it works:
+#   1. BLUE  = current live version (receives 100% traffic)
+#   2. GREEN = new version (deployed but receives 0% traffic)
+#   3. Run smoke tests on GREEN while BLUE serves users
+#   4. Switch Service selector from blue → green in milliseconds
+#   5. Keep BLUE running for instant rollback
+#   6. After validation period, scale down BLUE
+#
+# vs Canary: Blue-Green is all-or-nothing switch, Canary is gradual %
+# vs Rolling: Blue-Green has zero downtime, Rolling updates in-place
+
+# ── BLUE Deployment (current stable) ────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: employee-service-blue
+  namespace: employee-platform
+  labels:
+    app: employee-service
+    slot: blue
+    version: "1.5.2"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: employee-service
+      slot: blue
+  template:
+    metadata:
+      labels:
+        app: employee-service
+        slot: blue
+        version: "1.5.2"
+    spec:
+      containers:
+        - name: employee-service
+          image: ghcr.io/hemanthguvvala/employee-service:1.5.2
+          ports:
+            - containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests: { memory: "256Mi", cpu: "250m" }
+            limits:   { memory: "512Mi", cpu: "1000m" }
+
+---
+# ── GREEN Deployment (new version — dark, not yet receiving traffic) ──
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: employee-service-green
+  namespace: employee-platform
+  labels:
+    app: employee-service
+    slot: green
+    version: "1.6.0"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: employee-service
+      slot: green
+  template:
+    metadata:
+      labels:
+        app: employee-service
+        slot: green
+        version: "1.6.0"
+    spec:
+      containers:
+        - name: employee-service
+          image: ghcr.io/hemanthguvvala/employee-service:1.6.0   # NEW VERSION
+          ports:
+            - containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests: { memory: "256Mi", cpu: "250m" }
+            limits:   { memory: "512Mi", cpu: "1000m" }
+
+---
+# ── Production Service (currently pointing to BLUE) ──────────
+# To switch to GREEN: kubectl patch svc employee-service -p '{"spec":{"selector":{"slot":"green"}}}'
+# To rollback to BLUE: kubectl patch svc employee-service -p '{"spec":{"selector":{"slot":"blue"}}}'
+apiVersion: v1
+kind: Service
+metadata:
+  name: employee-service
+  namespace: employee-platform
+  annotations:
+    # Track which slot is active for observability
+    deployment.kubernetes.io/active-slot: "blue"
+    deployment.kubernetes.io/blue-version: "1.5.2"
+    deployment.kubernetes.io/green-version: "1.6.0"
+spec:
+  selector:
+    app: employee-service
+    slot: blue       # ← CHANGE THIS to "green" to switch traffic
+  ports:
+    - port: 8081
+      targetPort: 8081
+
+---
+# ── Smoke test Service (always points to GREEN for pre-production testing) ──
+apiVersion: v1
+kind: Service
+metadata:
+  name: employee-service-green-test
+  namespace: employee-platform
+  labels:
+    purpose: blue-green-smoke-test
+spec:
+  selector:
+    app: employee-service
+    slot: green
+  ports:
+    - port: 8081
+      targetPort: 8081
+  type: ClusterIP   # Internal only — accessed by smoke test jobs, not users
+
+---
+# ── ConfigMap: Blue-Green switch script ─────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blue-green-switch-script
+  namespace: employee-platform
+data:
+  switch-to-green.sh: |
+    #!/bin/bash
+    # Run this after green smoke tests PASS
+    set -e
+    NAMESPACE=${NAMESPACE:-employee-platform}
+    SERVICE=${SERVICE:-employee-service}
+    NEW_SLOT=${NEW_SLOT:-green}
+    OLD_SLOT=${OLD_SLOT:-blue}
+    NEW_VERSION=${NEW_VERSION:-"unknown"}
+
+    echo "=== Blue-Green Switch: $OLD_SLOT → $NEW_SLOT ==="
+    echo "New version: $NEW_VERSION"
+
+    # 1. Verify green pods are ready
+    echo "Checking green deployment readiness..."
+    kubectl wait deployment/employee-service-green \
+      --for=condition=Available \
+      --timeout=120s \
+      -n $NAMESPACE
+
+    # 2. Switch the service selector
+    echo "Switching traffic to $NEW_SLOT..."
+    kubectl patch service $SERVICE \
+      -n $NAMESPACE \
+      --type='json' \
+      -p="[{\"op\":\"replace\",\"path\":\"/spec/selector/slot\",\"value\":\"$NEW_SLOT\"}]"
+
+    # 3. Update annotation to record the switch
+    kubectl annotate service $SERVICE \
+      -n $NAMESPACE \
+      deployment.kubernetes.io/active-slot="$NEW_SLOT" \
+      deployment.kubernetes.io/last-switch-time="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --overwrite
+
+    echo "✓ Traffic switched to $NEW_SLOT ($NEW_VERSION)"
+
+  rollback.sh: |
+    #!/bin/bash
+    set -e
+    kubectl patch service ${SERVICE:-employee-service} \
+      -n ${NAMESPACE:-employee-platform} \
+      --type='json' \
+      -p='[{"op":"replace","path":"/spec/selector/slot","value":"blue"}]'
+    echo "✓ Rolled back to BLUE"

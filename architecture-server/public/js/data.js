@@ -10,8 +10,8 @@ const ARCH_DATA = {
     java: 17,
     totalServices: 6,
     totalClasses: 173,
-    totalPatterns: 34,
-    totalTechnologies: 65
+    totalPatterns: 42,
+    totalTechnologies: 89
   },
 
   services: {
@@ -446,6 +446,13 @@ const ARCH_DATA = {
     { name: 'GraphQL API', category: 'API Design', where: 'notification-microservice', description: 'Spring Boot GraphQL with schema-first approach. Clients request exactly the fields they need.', interview: 'GraphQL vs REST: GraphQL solves over-fetching/under-fetching. Single endpoint, typed schema. Used alongside REST in same service for flexibility.' },
     { name: 'Repository Pattern', category: 'DDD', where: 'All services', description: 'Spring Data JPA repositories abstract data access. Domain objects decoupled from persistence.', interview: 'Mediates between domain model and data mapping. Spring Data auto-generates implementations from interface method names. Custom queries with @Query.' },
     { name: 'DTO Pattern', category: 'Architecture', where: 'All services', description: 'MapStruct-based compile-time DTO mapping. Separates API contracts from domain entities.', interview: 'DTOs prevent exposing internal entity structure. MapStruct generates mapping code at compile time — zero runtime reflection. Type-safe, faster than ModelMapper/Dozer.' },
+    { name: 'GitOps', category: 'DevOps', where: 'k8s/argocd/', description: 'ArgoCD continuously syncs Git → Kubernetes state. If cluster drifts from Git, ArgoCD auto-heals. All deployments via pull requests to the infra Git repo.', interview: 'GitOps: Git is the single source of truth for infrastructure state. ArgoCD polls Git every 3 minutes. Drift detection + self-healing. Audit trail: every deployment is a Git commit. Enables instant rollback by reverting a PR.' },
+    { name: 'Backend for Frontend (BFF)', category: 'Architectural', where: 'bff-service/', description: 'Dedicated aggregation layer for React SPA. Combines employee + payroll + notification data in one call. Eliminates N chatty frontend→microservice calls.', interview: 'BFF pattern: each frontend gets a dedicated API that returns exactly what it needs — no over/under-fetching. BFF owns the shaping, caching, and aggregation concern. Uses circuit breakers (opossum) per upstream service. Enables partial success: return available data if one upstream is down.' },
+    { name: 'Blue-Green Deployment', category: 'DevOps', where: 'k8s/bff/blue-green-strategy.yaml', description: 'Two identical environments (Blue = current, Green = new). Traffic switch is a single kubectl patch on Service selector. Zero downtime, instant rollback.', interview: 'vs Rolling: Rolling updates pods one-by-one (briefly runs mixed versions). Blue-Green: switch is all-at-once in milliseconds. vs Canary: Canary shifts traffic gradually (10%→50%→100%). Blue-Green is binary. Keep BLUE running for 30min post-switch for instant rollback.' },
+    { name: 'Consumer-Driven Contract Testing', category: 'Testing', where: 'pact-tests/', description: 'Pact framework: payroll-service defines what it expects from employee-service API. Contract file published to Pact Broker. Employee-service runs provider verification tests.', interview: 'Solves the mock staleness problem: regular mocks can lie (say field X exists when it does not). Pact ensures both sides honour the contract. Enables "can I deploy?" check — verify consumer contract satisfied before any deployment.' },
+    { name: 'Chaos Engineering', category: 'Resilience', where: 'k8s/chaos/', description: 'Chaos Mesh experiments: PodChaos kills pods, NetworkChaos injects latency/packet loss, StressChaos creates CPU/memory pressure, HTTPChaos injects 503s.', interview: 'Chaos Engineering principle: inject failures in controlled way to find weaknesses before they find you. Chaos Mesh is K8s-native CRD-based. PodChaos tests restart resilience. NetworkChaos (200ms latency) triggers circuit breakers. CPU stress validates KEDA autoscaling. Schedule chaos drills in staging on a cron.' },
+    { name: 'SLO / Error Budget', category: 'Observability', where: 'monitoring/prometheus/alerts/', description: 'Recording rules compute 30-day success rates. Multi-window burn rate alerts: 14x burn rate → 2h to exhaustion (page). Error budget consumed = 1 - 30d_success_rate.', interview: 'SLO = Service Level Objective. Error budget = 100% - SLO%. If SLO=99.9%, budget=0.1%=43.2min/month. Burn rate alert: if consuming budget 14x faster than normal → exhausted in 2h → page immediately. This is the Google SRE burn rate alerting model.' },
+    { name: 'External Secrets / Zero-Trust', category: 'Security', where: 'k8s/security/', description: 'External Secrets Operator syncs from AWS Secrets Manager/Vault to K8s. No plaintext secrets in Git or K8s manifests. Secrets rotated on configurable schedule.', interview: 'Zero-trust: never hardcode secrets. External Secrets Operator uses IRSA (IAM Roles for Service Accounts) on EKS — pods get AWS credentials via K8s service account annotation. Rotation: refreshInterval=1h means secrets auto-rotate without pod restart.' },
   ],
 
   techStack: [
@@ -527,6 +534,20 @@ const ARCH_DATA = {
       { name: 'Spring Security', color: '#3fb950', desc: 'Authentication & authorization framework' },
       { name: 'BCrypt', color: '#8b949e', desc: 'Password hashing' },
       { name: 'CORS', color: '#8b949e', desc: 'Cross-origin resource sharing' },
+      { name: 'Keycloak 24', color: '#f85149', desc: 'OAuth2/OIDC Identity Provider — PKCE for SPAs, M2M client_credentials, SSO' },
+      { name: 'External Secrets Operator', color: '#bc8cff', desc: 'Syncs secrets from AWS Secrets Manager / HashiCorp Vault to K8s' },
+      { name: 'Trivy', color: '#58a6ff', desc: 'Container CVE scanning, IaC misconfiguration, secret scanning, SBOM' },
+    ]},
+    { category: 'Platform Engineering', items: [
+      { name: 'KEDA 2.x', color: '#f0883e', desc: 'Event-driven autoscaling — Kafka consumer lag triggers HPA scale-out' },
+      { name: 'ArgoCD', color: '#39d2c0', desc: 'GitOps continuous deployment — automated sync + self-heal from Git' },
+      { name: 'Chaos Mesh', color: '#f85149', desc: 'Chaos engineering — PodChaos, NetworkChaos, StressChaos, HTTPChaos' },
+      { name: 'Confluent Schema Registry', color: '#f0883e', desc: 'Avro/Protobuf schema governance — BACKWARD compatibility enforcement' },
+      { name: 'OpenTelemetry Collector', color: '#58a6ff', desc: 'Unified observability pipeline — traces + metrics + logs with tail sampling' },
+      { name: 'Pact Broker', color: '#3fb950', desc: 'Consumer-driven contract testing — prevents breaking API changes across services' },
+    ]},
+    { category: 'Load Testing', items: [
+      { name: 'k6', color: '#bc8cff', desc: 'JavaScript load testing — SLO thresholds, ramp-up scenarios, spike testing' },
     ]},
   ],
 
@@ -915,5 +936,96 @@ const ARCH_DATA = {
     class ECR reg
     class HELM,K8S deploy
     class VPC,EKS,RDS,ECACHE,MSK,S3,CW infra`,
+
+    gitopsFlow: `graph LR
+    subgraph Dev["👨‍💻 Developer"]
+        Code["Code Change"] -->|git push| PR["Pull Request"]
+        PR -->|CI passes| Merge["Merge to main"]
+    end
+
+    subgraph GitRepo["📁 Git Repository"]
+        Merge --> AppCode["Application Code"]
+        Merge --> K8sManifests["K8s Manifests\\n(k8s/services/*.yaml)"]
+    end
+
+    subgraph ArgoCD["🔄 ArgoCD GitOps Engine"]
+        Poll["Poll every 3min"] -->|diff| Drift{"Drift\\nDetected?"}
+        Drift -->|Yes| Sync["Auto-Sync + Self-Heal"]
+        Drift -->|No| Idle["✓ In Sync"]
+    end
+
+    subgraph K8sCluster["☸️ Kubernetes Cluster"]
+        Sync --> Deploy["Deploy Pods"]
+        Deploy --> KEDA["KEDA ScaledObject\\n(Kafka lag → HPA)"]
+        KEDA -->|scale out| Pods["Service Pods\\n(1 → 10)"]
+    end
+
+    K8sManifests -.->|watched by| Poll
+    AppCode -.->|build→push| Registry["Container Registry"]
+    Registry -.->|image tag in manifest| K8sManifests
+
+    classDef green fill:#1a2a1a,stroke:#3fb950,color:#3fb950
+    classDef blue fill:#1a1a2a,stroke:#58a6ff,color:#58a6ff
+    classDef purple fill:#2a1a3a,stroke:#bc8cff,color:#bc8cff
+    class Code,PR,Merge green
+    class ArgoCD,Poll,Drift,Sync,Idle blue
+    class Deploy,KEDA,Pods purple`,
+
+    oauth2Flow: `sequenceDiagram
+    participant User as 👤 User
+    participant React as ⚛️ React SPA
+    participant Keycloak as 🔐 Keycloak
+    participant GW as 🚪 API Gateway
+    participant EMP as 👤 Employee Service
+
+    Note over React,Keycloak: PKCE Authorization Code Flow (no client secret in browser)
+
+    User->>React: Click Login
+    React->>React: Generate code_verifier + code_challenge
+    React->>Keycloak: GET /auth?client_id=react&response_type=code&code_challenge=...
+    Keycloak->>User: Show Login Page
+    User->>Keycloak: Submit credentials
+    Keycloak->>React: Redirect with code=abc123
+    React->>Keycloak: POST /token {code, code_verifier}
+    Keycloak->>React: {access_token (JWT), refresh_token}
+    
+    Note over React,EMP: Authenticated API calls
+    React->>GW: GET /api/v1/employees  Authorization: Bearer <JWT>
+    GW->>GW: Validate JWT signature (Keycloak public key)
+    GW->>EMP: Forward request + X-User-Id, X-User-Roles
+    EMP->>GW: 200 OK {employees}
+    GW->>React: 200 OK {employees}
+
+    Note over React,Keycloak: Token refresh (before expiry)
+    React->>Keycloak: POST /token {grant_type=refresh_token, refresh_token}
+    Keycloak->>React: New access_token (refresh token rotation)`,
+
+    bffAggregation: `sequenceDiagram
+    participant SPA as ⚛️ React SPA
+    participant BFF as 🎯 BFF Service
+    participant EMP as 👤 Employee Svc
+    participant PAY as 💰 Payroll Svc  
+    participant NOT as 🔔 Notification Svc
+
+    Note over SPA,BFF: Single request replaces 3 separate calls
+
+    SPA->>BFF: GET /api/bff/v1/dashboard/42
+    
+    Note over BFF: Promise.allSettled — all 3 in parallel
+    par Parallel upstream calls
+        BFF->>EMP: GET /api/v1/employees/42
+        BFF->>PAY: GET /api/v1/payroll/summary/42
+        BFF->>NOT: GET /api/v1/notifications/unread-count/42
+    end
+    EMP->>BFF: {id, name, department, salary}
+    PAY->>BFF: {currentSalary, ytdEarnings, pendingApprovals}
+    NOT->>BFF: {count: 3, hasUrgent: false}
+
+    Note over BFF: Shape response for dashboard — only needed fields
+    BFF->>SPA: {profile, payrollSummary, notifications, _meta}
+
+    Note over BFF,NOT: Partial success — if notification fails, return what we have
+    BFF--xNOT: 503 Service Unavailable
+    BFF->>SPA: {profile, payrollSummary, notifications: {unreadCount:0}, _meta:{partial:true}}`,
   },
 };

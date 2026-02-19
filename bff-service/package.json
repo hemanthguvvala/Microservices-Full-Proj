@@ -1,0 +1,24 @@
+{
+  "name": "bff-service",
+  "version": "1.0.0",
+  "description": "Backend for Frontend — aggregates microservice data for React SPA",
+  "main": "src/bff-server.js",
+  "scripts": {
+    "start": "node src/bff-server.js",
+    "dev": "nodemon src/bff-server.js",
+    "test": "jest --coverage",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "express": "^4.18.2",
+    "morgan": "^1.10.0",
+    "opossum": "^8.1.0",
+    "prom-client": "^15.1.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "nodemon": "^3.0.0",
+    "supertest": "^6.3.0"
+  }
+}

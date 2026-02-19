@@ -1,0 +1,184 @@
+# ═══════════════════════════════════════════════════════════════
+# Chaos Engineering with Chaos Mesh
+# Install: helm repo add chaos-mesh https://charts.chaos-mesh.org
+#          helm install chaos-mesh chaos-mesh/chaos-mesh --namespace=chaos-mesh --create-namespace
+# Verify: kubectl get pods -n chaos-mesh
+# Dashboard: kubectl port-forward service/chaos-dashboard -n chaos-mesh 2333:2333
+# ═══════════════════════════════════════════════════════════════
+
+# ── Experiment 1: Kill employee-service pods (tests restart resilience) ──
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: employee-service-pod-kill
+  namespace: chaos-mesh
+  labels:
+    experiment: pod-kill
+    service: employee-service
+spec:
+  action: pod-kill
+  mode: one             # Kill 1 pod at a time
+  selector:
+    namespaces:
+      - employee-platform
+    labelSelectors:
+      app: employee-service
+  scheduler:
+    cron: "@every 30m"  # Run every 30 minutes for chaos drills
+  duration: "30s"       # Duration of chaos
+
+---
+# ── Experiment 2: Network latency injection (tests circuit breaker) ──
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: employee-to-payroll-latency
+  namespace: chaos-mesh
+  labels:
+    experiment: network-latency
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - employee-platform
+    labelSelectors:
+      app: employee-service      # Apply FROM employee-service
+  delay:
+    latency: "200ms"             # 200ms delay
+    correlation: "25"            # 25% correlation between packets
+    jitter: "50ms"               # ±50ms jitter
+  direction: to                  # Outgoing traffic
+  target:
+    selector:
+      namespaces:
+        - employee-platform
+      labelSelectors:
+        app: payroll-service     # TO payroll-service
+    mode: all
+  duration: "2m"
+
+---
+# ── Experiment 3: Network packet loss (tests retry logic) ──
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: kafka-packet-loss
+  namespace: chaos-mesh
+  labels:
+    experiment: packet-loss
+spec:
+  action: loss
+  mode: all
+  selector:
+    namespaces:
+      - employee-platform
+    labelSelectors:
+      app: notification-service
+  loss:
+    loss: "20"            # 20% packet loss
+    correlation: "25"
+  target:
+    selector:
+      namespaces:
+        - employee-platform
+      labelSelectors:
+        app: kafka
+    mode: all
+  duration: "1m"
+
+---
+# ── Experiment 4: CPU stress (tests autoscaling with KEDA) ──
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: payroll-service-cpu-stress
+  namespace: chaos-mesh
+  labels:
+    experiment: cpu-stress
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - employee-platform
+    labelSelectors:
+      app: payroll-service
+  stressors:
+    cpu:
+      workers: 4          # 4 CPU worker goroutines
+      load: 80            # 80% CPU utilization
+  duration: "3m"          # 3 minutes — should trigger KEDA scale-out
+
+---
+# ── Experiment 5: Memory stress (tests OOM handling) ──
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: employee-service-memory-stress
+  namespace: chaos-mesh
+  labels:
+    experiment: memory-stress
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - employee-platform
+    labelSelectors:
+      app: employee-service
+  stressors:
+    memory:
+      workers: 2
+      size: "256MB"        # Allocate 256MB to trigger GC pressure
+  duration: "2m"
+
+---
+# ── Experiment 6: HTTP fault injection (tests error handling) ──
+apiVersion: chaos-mesh.org/v1alpha1
+kind: HTTPChaos
+metadata:
+  name: api-gateway-503-injection
+  namespace: chaos-mesh
+  labels:
+    experiment: http-fault
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - employee-platform
+    labelSelectors:
+      app: api-gateway
+  target: Response          # Inject into responses
+  port: 8080
+  path: "/api/employees/*"  # Only affect employee endpoints
+  abort: false
+  delay: "100ms"
+  replace:
+    code: 503              # Replace with 503 for 30% of requests
+  percent: 30
+  duration: "1m"
+
+---
+# ── Chaos Workflow — Full resilience drill (ordered experiments) ──
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Workflow
+metadata:
+  name: full-resilience-drill
+  namespace: chaos-mesh
+spec:
+  entry: resilience-drill
+  templates:
+    - name: resilience-drill
+      templateType: Serial
+      children:
+        - latency-phase
+        - pod-kill-phase
+        - cpu-stress-phase
+    - name: latency-phase
+      templateType: Suspend
+      deadline: 2m          # Run network latency for 2 minutes
+    - name: pod-kill-phase
+      templateType: Suspend
+      deadline: 1m          # Then kill a pod
+    - name: cpu-stress-phase
+      templateType: Suspend
+      deadline: 3m          # Then CPU stress

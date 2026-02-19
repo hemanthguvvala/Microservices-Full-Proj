@@ -1,0 +1,101 @@
+# ═══════════════════════════════════════════════════════
+# SLO Recording Rules — Pre-computed aggregations
+# These allow fast dashboard queries and multi-window burn rate alerts
+# ═══════════════════════════════════════════════════════
+groups:
+  - name: slo.recording_rules
+    interval: 30s
+    rules:
+
+      # ── Request success rate (1 - error rate) ─────────────
+      - record: service:request_success_rate:5m
+        expr: |
+          1 - (
+            sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) by (service)
+            /
+            sum(rate(http_server_requests_seconds_count[5m])) by (service)
+          )
+
+      - record: service:request_success_rate:1h
+        expr: |
+          1 - (
+            sum(rate(http_server_requests_seconds_count{status=~"5.."}[1h])) by (service)
+            /
+            sum(rate(http_server_requests_seconds_count[1h])) by (service)
+          )
+
+      - record: service:request_success_rate:30d
+        expr: |
+          1 - (
+            sum(rate(http_server_requests_seconds_count{status=~"5.."}[30d])) by (service)
+            /
+            sum(rate(http_server_requests_seconds_count[30d])) by (service)
+          )
+
+      # ── Latency percentiles (pre-computed) ───────────────
+      - record: service:request_latency_p50:5m
+        expr: histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket[5m])) by (le, service))
+
+      - record: service:request_latency_p95:5m
+        expr: histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le, service))
+
+      - record: service:request_latency_p99:5m
+        expr: histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[5m])) by (le, service))
+
+      # ── Request throughput ───────────────────────────────
+      - record: service:request_rate:5m
+        expr: sum(rate(http_server_requests_seconds_count[5m])) by (service)
+
+      # ── Error budget consumption (multi-window burn rate) ─
+      # SLO Target: 99.9% availability
+      # Error budget: 0.1% = 43.2 min/month
+      # Fast burn (1h window, 14x burn rate) + Slow burn (6h window, 5x)
+      - record: service:error_budget_burn_rate:1h
+        expr: |
+          (1 - service:request_success_rate:1h) / (1 - 0.999)
+
+      # ── Kafka consumer lag rate of change ────────────────
+      - record: kafka:consumer_lag_rate:5m
+        expr: rate(kafka_consumer_group_lag[5m])
+
+      # ── JVM metrics aggregated ───────────────────────────
+      - record: service:jvm_heap_utilization
+        expr: |
+          jvm_memory_used_bytes{area="heap"}
+          /
+          jvm_memory_max_bytes{area="heap"}
+
+      # ── SLO Compliance Summary ───────────────────────────
+      # Used in Grafana SLO dashboard panels
+      - record: slo:employee_service_availability:compliance
+        expr: service:request_success_rate:30d{service="employee-service"}
+
+      - record: slo:payroll_service_availability:compliance
+        expr: service:request_success_rate:30d{service="payroll-service"}
+
+      - record: slo:api_gateway_latency_p99:compliance
+        expr: service:request_latency_p99:5m{service="api-gateway"} < 1.0
+
+  # ── Alertmanager Multi-window Burn Rate ──────────────────
+  - name: slo.burn_rate_alerts
+    rules:
+      - alert: ErrorBudgetBurnRateCritical
+        # 14x burn rate over 1h = exhausts monthly budget in ~2 hours
+        expr: service:error_budget_burn_rate:1h > 14.4
+        for: 2m
+        labels:
+          severity: critical
+          page: "true"
+        annotations:
+          summary: "Error budget burning at 14x rate for {{ $labels.service }}"
+          description: "At this rate, monthly error budget will be exhausted in ~2h. Immediate action required."
+
+      - alert: ErrorBudgetBurnRateHigh
+        # 6x burn rate over 6h = exhausts monthly budget in ~5 days
+        expr: service:error_budget_burn_rate:1h > 6
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Error budget burning at 6x rate for {{ $labels.service }}"
+          description: "Monthly error budget reduces significantly at this burn rate."

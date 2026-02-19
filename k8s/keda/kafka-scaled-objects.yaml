@@ -1,0 +1,105 @@
+# ═══════════════════════════════════════════════════════════════
+# KEDA — Kubernetes Event-Driven Autoscaling
+# Scales pods based on Kafka consumer lag (not CPU/Memory)
+# Install: helm repo add kedacore https://kedacore.github.io/charts
+#          helm install keda kedacore/keda --namespace keda --create-namespace
+# ═══════════════════════════════════════════════════════════════
+
+# ── Payroll Service — scales when employee-created events back up ──
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: payroll-service-scaledobject
+  namespace: employee-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: payroll-service
+  pollingInterval: 15       # Check lag every 15 seconds
+  cooldownPeriod: 60        # Wait 60s before scaling down
+  minReplicaCount: 1        # Never scale to 0 (it's a critical service)
+  maxReplicaCount: 10       # Max 10 replicas
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:29092
+        consumerGroup: payroll-service-group
+        topic: employee-events
+        lagThreshold: "50"      # 1 extra replica per 50 messages lag
+        offsetResetPolicy: earliest
+
+---
+# ── Notification Service — scales when notification events queue up ──
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: notification-service-scaledobject
+  namespace: employee-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: notification-service
+  pollingInterval: 15
+  cooldownPeriod: 120       # Notifications are bursty, slower scale-down
+  minReplicaCount: 1
+  maxReplicaCount: 20       # Notifications can spike; allow higher scale
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:29092
+        consumerGroup: notification-service-group
+        topic: employee-events
+        lagThreshold: "100"
+        offsetResetPolicy: earliest
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:29092
+        consumerGroup: notification-bulk-group
+        topic: payroll-events
+        lagThreshold: "200"
+
+---
+# ── TriggerAuthentication — Use k8s Secret for Kafka SASL (production) ──
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: kafka-trigger-auth
+  namespace: employee-platform
+spec:
+  secretTargetRef:
+    - parameter: sasl
+      name: kafka-auth-secret
+      key: sasl
+    - parameter: username
+      name: kafka-auth-secret
+      key: username
+    - parameter: password
+      name: kafka-auth-secret
+      key: password
+
+---
+# ── HPA override — Disable default HPA when KEDA manages scaling ──
+# KEDA creates its own HPA; set min/max explicitly:
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: payroll-service-hpa-cpu-fallback
+  namespace: employee-platform
+  annotations:
+    keda.sh/managed: "true"   # Lets KEDA manage this HPA
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: payroll-service
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

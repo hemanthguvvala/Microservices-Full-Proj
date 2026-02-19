@@ -1,0 +1,69 @@
+# ═══════════════════════════════════════════════════════
+# Confluent Schema Registry — Avro/Protobuf schema governance
+# Enforces producer/consumer contracts. Schema evolution with BACKWARD compat.
+# ═══════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: schema-registry
+  namespace: employee-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: schema-registry
+  template:
+    metadata:
+      labels:
+        app: schema-registry
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8085"
+    spec:
+      containers:
+        - name: schema-registry
+          image: confluentinc/cp-schema-registry:7.5.0
+          ports:
+            - containerPort: 8081
+            - containerPort: 8085  # JMX exporter for Prometheus
+          env:
+            - name: SCHEMA_REGISTRY_HOST_NAME
+              value: schema-registry
+            - name: SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS
+              value: kafka:29092
+            - name: SCHEMA_REGISTRY_KAFKASTORE_TOPIC
+              value: _schemas
+            - name: SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL
+              # BACKWARD: new schema can read old data (delete/default fields)
+              # FORWARD: old schema can read new data (add optional fields)
+              # FULL: both directions
+              value: BACKWARD
+            - name: SCHEMA_REGISTRY_LOG4J_ROOT_LOGLEVEL
+              value: INFO
+          readinessProbe:
+            httpGet:
+              path: /subjects
+              port: 8081
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "250m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: schema-registry
+  namespace: employee-platform
+spec:
+  selector:
+    app: schema-registry
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081
+  type: ClusterIP

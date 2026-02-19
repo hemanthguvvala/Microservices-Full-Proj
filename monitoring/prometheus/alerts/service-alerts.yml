@@ -1,0 +1,235 @@
+# ═══════════════════════════════════════════════════════════════
+# Prometheus Alerting Rules — Employee Platform
+# Covers: SLO breach, latency, error rate, saturation, Kafka lag,
+#         circuit breaker, JVM health, infra availability
+# ═══════════════════════════════════════════════════════════════
+
+groups:
+
+  # ── Availability / SLO ──────────────────────────────────────
+  - name: slo.availability
+    rules:
+      - alert: ServiceErrorRateTooHigh
+        expr: |
+          (
+            sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) by (service)
+          /
+            sum(rate(http_server_requests_seconds_count[5m])) by (service)
+          ) * 100 > 1
+        for: 2m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "{{ $labels.service }} error rate above 1% SLO"
+          description: "Error rate is {{ $value | humanize }}% for {{ $labels.service }}. SLO breach: availability < 99%."
+          runbook: "https://github.com/hemanthguvvala/Microservices-Full-Proj/blob/main/docs/OPERATIONAL_RUNBOOK.md"
+
+      - alert: ServiceDown
+        expr: up{job=~"employee-service|payroll-service|notification-service|api-gateway|eureka|config-server"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Service {{ $labels.job }} is DOWN"
+          description: "Prometheus cannot scrape {{ $labels.job }} on {{ $labels.instance }}. Service may be crashed."
+
+      - alert: ServiceHighAvailabilityViolation
+        # SLO: 99.9% uptime = max 43.2 min/month downtime
+        expr: |
+          (
+            avg_over_time(up{job=~"employee-service|payroll-service"}[30d]) * 100
+          ) < 99.9
+        labels:
+          severity: warning
+        annotations:
+          summary: "30-day availability SLO breach for {{ $labels.job }}"
+          description: "30-day availability is {{ $value | humanize }}%, below 99.9% SLO target."
+
+  # ── Latency / SLO ───────────────────────────────────────────
+  - name: slo.latency
+    rules:
+      - alert: P95LatencyTooHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_server_requests_seconds_bucket[5m])) by (le, service)
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "P95 latency above 500ms for {{ $labels.service }}"
+          description: "P95 latency is {{ $value | humanizeDuration }} for {{ $labels.service }}."
+
+      - alert: P99LatencyTooHigh
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_server_requests_seconds_bucket[5m])) by (le, service)
+          ) > 1.0
+        for: 5m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "P99 latency above 1s for {{ $labels.service }}"
+          description: "P99 latency is {{ $value | humanizeDuration }} for {{ $labels.service }}. SLO: < 1s."
+
+  # ── Circuit Breaker ──────────────────────────────────────────
+  - name: resilience.circuit_breaker
+    rules:
+      - alert: CircuitBreakerOpen
+        expr: resilience4j_circuitbreaker_state{state="open"} == 1
+        for: 1m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "Circuit breaker OPEN: {{ $labels.name }} on {{ $labels.service }}"
+          description: "Circuit breaker {{ $labels.name }} in {{ $labels.service }} is OPEN. Downstream may be unavailable."
+
+      - alert: CircuitBreakerHighFailureRate
+        expr: resilience4j_circuitbreaker_failure_rate > 50
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Circuit breaker failure rate > 50%: {{ $labels.name }}"
+          description: "{{ $labels.name }} has {{ $value }}% failure rate. Circuit may trip soon."
+
+  # ── Kafka Consumer Lag ───────────────────────────────────────
+  - name: kafka.consumer_lag
+    rules:
+      - alert: KafkaConsumerLagHigh
+        expr: kafka_consumer_group_lag > 1000
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Kafka consumer lag high: {{ $labels.group }} on {{ $labels.topic }}"
+          description: "Consumer group {{ $labels.group }} is {{ $value }} messages behind on topic {{ $labels.topic }}. Consider scaling consumers with KEDA."
+
+      - alert: KafkaConsumerLagCritical
+        expr: kafka_consumer_group_lag > 10000
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka consumer lag CRITICAL: {{ $labels.group }}"
+          description: "Consumer group {{ $labels.group }} is {{ $value }} messages behind. Data processing severely delayed."
+
+      - alert: KafkaBrokerDown
+        expr: kafka_brokers < 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka broker offline"
+          description: "No Kafka brokers are reachable. Event streaming has stopped."
+
+  # ── JVM Health ───────────────────────────────────────────────
+  - name: jvm.health
+    rules:
+      - alert: JVMHeapUsageHigh
+        expr: |
+          (
+            jvm_memory_used_bytes{area="heap"}
+          /
+            jvm_memory_max_bytes{area="heap"}
+          ) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "JVM heap usage > 85% for {{ $labels.service }}"
+          description: "Heap usage is {{ $value }}% for {{ $labels.service }}. GC pressure may cause latency spikes."
+
+      - alert: JVMGCTimeHigh
+        expr: rate(jvm_gc_pause_seconds_sum[5m]) > 0.3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High GC pause time in {{ $labels.service }}"
+          description: "GC is consuming {{ $value | humanizeDuration }} per second in {{ $labels.service }}."
+
+      - alert: JVMThreadsDeadlocked
+        expr: jvm_threads_deadlocked > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "JVM deadlock detected in {{ $labels.service }}"
+          description: "{{ $value }} threads are deadlocked in {{ $labels.service }}. Restart may be required."
+
+  # ── Database ─────────────────────────────────────────────────
+  - name: database.health
+    rules:
+      - alert: DatabaseConnectionPoolExhausted
+        expr: hikaricp_connections_active / hikaricp_connections_max > 0.9
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DB connection pool > 90% for {{ $labels.service }}"
+          description: "HikariCP pool is {{ $value | humanizePercentage }} utilised. Requests may start timing out."
+
+      - alert: DatabaseSlowQueries
+        expr: rate(spring_data_repository_invocations_seconds_sum[5m]) / rate(spring_data_repository_invocations_seconds_count[5m]) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow DB queries detected in {{ $labels.service }}"
+          description: "Average query time is {{ $value | humanizeDuration }}. Check slow query log."
+
+  # ── Infrastructure ───────────────────────────────────────────
+  - name: infra.saturation
+    rules:
+      - alert: NodeCPUHigh
+        expr: 100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Node CPU > 80% on {{ $labels.instance }}"
+
+      - alert: NodeMemoryHigh
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Node memory > 85% on {{ $labels.instance }}"
+
+      - alert: PodRestartingFrequently
+        expr: increase(kube_pod_container_status_restarts_total[1h]) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod {{ $labels.pod }} restarting frequently"
+          description: "{{ $labels.pod }} has restarted {{ $value }} times in the last hour. Check logs."
+
+  # ── Outbox & Saga ────────────────────────────────────────────
+  - name: patterns.health
+    rules:
+      - alert: OutboxProcessorStuck
+        # Custom metric from OutboxEventPublisher
+        expr: increase(outbox_events_total{status="pending"}[10m]) == 0 AND outbox_events_pending_count > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Outbox processor may be stuck"
+          description: "Outbox table has {{ $value }} pending events but none processed in 10 min."
+
+      - alert: SagaCompensationTriggered
+        expr: increase(saga_compensations_total[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Saga compensation triggered in {{ $labels.service }}"
+          description: "{{ $value }} saga compensations triggered. Check for business logic failures."

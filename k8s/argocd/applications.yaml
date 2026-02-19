@@ -1,0 +1,156 @@
+# ═══════════════════════════════════════════════════════════════
+# ArgoCD GitOps — Application manifests
+# Install: kubectl create namespace argocd
+#          kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+# UI: kubectl port-forward svc/argocd-server -n argocd 8080:443
+# ═══════════════════════════════════════════════════════════════
+
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: employee-platform
+  namespace: argocd
+spec:
+  description: Employee Platform Microservices
+  sourceRepos:
+    - "https://github.com/hemanthguvvala/Microservices-Full-Proj.git"
+  destinations:
+    - namespace: employee-platform
+      server: https://kubernetes.default.svc
+    - namespace: monitoring
+      server: https://kubernetes.default.svc
+    - namespace: keda
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: keda.sh
+      kind: "*"
+  roles:
+    - name: developer
+      policies:
+        - p, proj:employee-platform:developer, applications, sync, employee-platform/*, allow
+        - p, proj:employee-platform:developer, applications, get, employee-platform/*, allow
+
+---
+# ── Employee Service Application ──────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: employee-service
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: employee-platform
+  source:
+    repoURL: https://github.com/hemanthguvvala/Microservices-Full-Proj.git
+    targetRevision: main
+    path: k8s/services/employee-service.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: employee-platform
+  syncPolicy:
+    automated:
+      prune: true      # Delete resources no longer in Git
+      selfHeal: true   # Auto-sync if cluster state drifts from Git
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 3
+      backoff:
+        duration: "5s"
+        factor: 2
+        maxDuration: "3m"
+  revisionHistoryLimit: 3
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: payroll-service
+  namespace: argocd
+spec:
+  project: employee-platform
+  source:
+    repoURL: https://github.com/hemanthguvvala/Microservices-Full-Proj.git
+    targetRevision: main
+    path: k8s/services/payroll-service.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: employee-platform
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: notification-service
+  namespace: argocd
+spec:
+  project: employee-platform
+  source:
+    repoURL: https://github.com/hemanthguvvala/Microservices-Full-Proj.git
+    targetRevision: main
+    path: k8s/services/notification-service.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: employee-platform
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: infrastructure
+  namespace: argocd
+spec:
+  project: employee-platform
+  source:
+    repoURL: https://github.com/hemanthguvvala/Microservices-Full-Proj.git
+    targetRevision: main
+    path: k8s/infrastructure
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: employee-platform
+  syncPolicy:
+    automated:
+      prune: false   # Don't auto-prune infra (DB, Kafka) — manual only
+      selfHeal: true
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas  # KEDA manages replicas, ignore ArgoCD drift
+
+---
+# ── Monitoring Stack Application ──────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-stack
+  namespace: argocd
+spec:
+  project: employee-platform
+  source:
+    repoURL: https://github.com/hemanthguvvala/Microservices-Full-Proj.git
+    targetRevision: main
+    path: k8s/monitoring
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

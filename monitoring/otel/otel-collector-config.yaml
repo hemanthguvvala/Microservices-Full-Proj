@@ -1,0 +1,195 @@
+# ═══════════════════════════════════════════════════════════════
+# OpenTelemetry Collector Configuration
+# ═══════════════════════════════════════════════════════════════
+# OTel Collector is the CENTRAL pipeline for all observability signals:
+#   Traces  → Jaeger (distributed tracing)
+#   Metrics → Prometheus (time-series)
+#   Logs    → Elasticsearch/Loki (log aggregation)
+#
+# Signal flow:
+#   Spring Boot apps (OTel SDK)
+#     ↓ OTLP gRPC :4317
+#   OTel Collector
+#     ↓ traces  → Jaeger :14250
+#     ↓ metrics → Prometheus :8889 (scraped by Prometheus)
+#     ↓ logs    → stdout (or Loki exporter)
+
+receivers:
+  # ── OTLP receiver — accepts from Spring Boot OTel agent ────
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317      # Java apps send here via -javaagent
+      http:
+        endpoint: 0.0.0.0:4318      # HTTP/protobuf alternative
+
+  # ── Jaeger receiver — if services send Jaeger format directly ──
+  jaeger:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:14250
+      thrift_http:
+        endpoint: 0.0.0.0:14268
+
+  # ── Prometheus receiver — scrape existing /actuator/prometheus ──
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'employee-service'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['employee-service:8081']
+          metrics_path: /actuator/prometheus
+
+        - job_name: 'payroll-service'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['payroll-service:8082']
+          metrics_path: /actuator/prometheus
+
+        - job_name: 'notification-service'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['notification-service:8083']
+          metrics_path: /actuator/prometheus
+
+        - job_name: 'bff-service'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['bff-service:3001']
+          metrics_path: /metrics
+
+  # ── Kubernetes attributes receiver — auto-annotate with K8s metadata ──
+  k8sattributes:
+    auth_type: "serviceAccount"
+    passthrough: false
+    extract:
+      metadata:
+        - k8s.pod.name
+        - k8s.pod.uid
+        - k8s.deployment.name
+        - k8s.namespace.name
+        - k8s.node.name
+      labels:
+        - tag_name: app.label.version
+          key: version
+          from: pod
+    pod_association:
+      - sources:
+          - from: resource_attribute
+            name: k8s.pod.ip
+
+processors:
+  # ── Batch processor — buffer and send in batches for efficiency ──
+  batch:
+    timeout: 5s            # Send batch every 5 seconds
+    send_batch_size: 1024  # Or when 1024 items accumulated
+    send_batch_max_size: 2048
+
+  # ── Memory limiter — prevent OOM on collector ──
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512         # Max 512MB memory
+    spike_limit_mib: 128   # Allow 128MB spike
+
+  # ── Resource processor — add standard attributes to all signals ──
+  resource:
+    attributes:
+      - key: service.environment
+        value: "production"
+        action: insert
+      - key: deployment.platform
+        value: "kubernetes"
+        action: insert
+
+  # ── Attributes processor — enrich/rename spans ──
+  attributes:
+    actions:
+      - key: http.user_agent
+        action: delete           # Strip PII — user agent
+      - key: db.statement
+        action: hash             # Hash SQL statements (sensitive data)
+      - key: environment
+        value: "production"
+        action: insert
+
+  # ── Tail sampling — only keep interesting traces (not 100% of /health) ──
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    expected_new_traces_per_sec: 100
+    policies:
+      - name: errors-policy
+        type: status_code
+        status_code: { status_codes: [ERROR] }    # Keep ALL error traces
+
+      - name: slow-traces-policy
+        type: latency
+        latency: { threshold_ms: 500 }             # Keep traces > 500ms
+
+      - name: sample-healthy-traffic
+        type: probabilistic
+        probabilistic: { sampling_percentage: 10 } # Sample 10% of normal traffic
+
+exporters:
+  # ── Jaeger exporter — distributed tracing dashboard ──
+  jaeger:
+    endpoint: "jaeger:14250"
+    tls:
+      insecure: true
+
+  # ── Prometheus exporter — expose metrics for Prometheus to scrape ──
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    resource_to_telemetry_conversion:
+      enabled: true
+    enable_open_metrics: true
+
+  # ── OTLP exporter — forward to cloud vendor (e.g. Datadog, Honeycomb) ──
+  otlp/cloud:
+    endpoint: "${OTEL_CLOUD_ENDPOINT}"
+    headers:
+      x-api-key: "${OTEL_API_KEY}"
+    tls:
+      insecure: false
+
+  # ── Logging exporter — debug output (disable in production) ──
+  logging:
+    loglevel: info
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+extensions:
+  health_check:
+    endpoint: "0.0.0.0:13133"
+  pprof:
+    endpoint: "0.0.0.0:1777"
+  zpages:
+    endpoint: "0.0.0.0:55679"
+
+service:
+  extensions: [health_check, pprof, zpages]
+  pipelines:
+    # ── Traces pipeline ──────────────────────────────────────
+    traces:
+      receivers:  [otlp, jaeger]
+      processors: [memory_limiter, k8sattributes, resource, attributes, tail_sampling, batch]
+      exporters:  [jaeger, logging]
+
+    # ── Metrics pipeline ─────────────────────────────────────
+    metrics:
+      receivers:  [otlp, prometheus]
+      processors: [memory_limiter, k8sattributes, resource, batch]
+      exporters:  [prometheus]
+
+    # ── Logs pipeline ────────────────────────────────────────
+    logs:
+      receivers:  [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters:  [logging]
+
+  telemetry:
+    logs:
+      level: "info"
+    metrics:
+      address: "0.0.0.0:8888"   # Collector self-monitoring metrics

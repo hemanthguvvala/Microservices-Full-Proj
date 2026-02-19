@@ -1,0 +1,121 @@
+{
+  "realm": "employee-platform",
+  "displayName": "Employee Platform",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 30,
+  "clients": [
+    {
+      "clientId": "employee-platform-react",
+      "name": "Employee Platform React SPA",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "redirectUris": ["http://localhost:3000/*", "https://app.employee-platform.com/*"],
+      "webOrigins": ["http://localhost:3000", "https://app.employee-platform.com"],
+      "protocolMappers": [
+        {
+          "name": "roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "access.token.claim": "true",
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "employee-platform-angular",
+      "name": "Employee Platform Angular SPA",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "redirectUris": ["http://localhost:4201/*"],
+      "webOrigins": ["http://localhost:4201"]
+    },
+    {
+      "clientId": "employee-service",
+      "name": "Employee Microservice (M2M)",
+      "enabled": true,
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "employee-service-secret"
+    },
+    {
+      "clientId": "payroll-service",
+      "name": "Payroll Microservice (M2M)",
+      "enabled": true,
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "payroll-service-secret"
+    },
+    {
+      "clientId": "notification-service",
+      "name": "Notification Microservice (M2M)",
+      "enabled": true,
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "notification-service-secret"
+    }
+  ],
+  "roles": {
+    "realm": [
+      { "name": "ADMIN", "description": "Full system access" },
+      { "name": "HR_MANAGER", "description": "HR management operations" },
+      { "name": "PAYROLL_MANAGER", "description": "Payroll operations" },
+      { "name": "EMPLOYEE", "description": "Standard employee access" },
+      { "name": "READONLY", "description": "Read-only access" }
+    ]
+  },
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "admin@employee-platform.com",
+      "credentials": [{ "type": "password", "value": "admin123", "temporary": false }],
+      "realmRoles": ["ADMIN"]
+    },
+    {
+      "username": "hr-manager",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "hr@employee-platform.com",
+      "credentials": [{ "type": "password", "value": "hr123", "temporary": false }],
+      "realmRoles": ["HR_MANAGER"]
+    }
+  ],
+  "tokenSettings": {
+    "accessTokenLifespan": 300,
+    "refreshTokenMaxReuse": 0,
+    "revokeRefreshToken": true,
+    "refreshTokenLifespan": 1800
+  }
+}
