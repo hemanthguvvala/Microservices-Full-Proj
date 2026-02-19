@@ -24,6 +24,10 @@
         <mapstruct.version>1.5.5.Final</mapstruct.version>
         <lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
         <testcontainers.version>1.19.3</testcontainers.version>
+        <!-- gRPC client for calling analytics-service -->
+        <grpc.version>1.62.2</grpc.version>
+        <protobuf.version>3.25.3</protobuf.version>
+        <grpc-spring-boot.version>3.1.0.RELEASE</grpc-spring-boot.version>
     </properties>
 
     <dependencies>
@@ -347,10 +351,85 @@
             <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             gRPC CLIENT — calls analytics-service via binary Protocol Buffers
+             Interview: "Why use gRPC for internal service calls vs REST?"
+             → Binary protocol, 10x smaller payload, HTTP/2 multiplexing,
+               strong typing from .proto schema, native streaming support
+             ═══════════════════════════════════════════════════════════════════ -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-client-spring-boot-starter</artifactId>
+            <version>${grpc-spring-boot.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-netty-shaded</artifactId>
+            <version>${grpc.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-protobuf</artifactId>
+            <version>${grpc.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+            <version>${grpc.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>${protobuf.version}</version>
+        </dependency>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             OpenTelemetry — distributed tracing across REST + gRPC boundaries
+             Interview: "How do you correlate a trace from REST through gRPC?"
+             → OTel auto-instruments Spring MVC + gRPC. Same trace ID flows through
+               both. Spans visible in Jaeger/Tempo. Zero code change needed.
+             ═══════════════════════════════════════════════════════════════════ -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+            <version>2.1.0</version>
+        </dependency>
     </dependencies>
 
     <build>
+        <extensions>
+            <!-- Required by protobuf-maven-plugin to detect OS+arch for protoc binary -->
+            <extension>
+                <groupId>kr.motd.maven</groupId>
+                <artifactId>os-maven-plugin</artifactId>
+                <version>1.7.1</version>
+            </extension>
+        </extensions>
         <plugins>
+            <!-- Generate gRPC stub classes from proto files -->
+            <plugin>
+                <groupId>org.xolstice.maven.plugins</groupId>
+                <artifactId>protobuf-maven-plugin</artifactId>
+                <version>0.6.1</version>
+                <configuration>
+                    <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
+                    <pluginId>grpc-java</pluginId>
+                    <pluginArtifact>io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}</pluginArtifact>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>compile</goal>
+                            <goal>compile-custom</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

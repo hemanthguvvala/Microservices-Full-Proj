@@ -1,0 +1,156 @@
+syntax = "proto3";
+
+package analytics;
+
+option java_multiple_files = true;
+option java_package = "com.example.analytics.grpc";
+option java_outer_classname = "EmployeeAnalyticsProto";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Employee Analytics Service — gRPC Contract
+//
+// Interview: "Why Protocol Buffers instead of JSON over REST?"
+// 1. Binary encoding: ~10x smaller payload than JSON
+// 2. Strongly typed: the .proto IS the documentation + schema validation
+// 3. Code generation: clients in any language from one source of truth
+// 4. HTTP/2: multiplexing, header compression, server push
+// 5. Streaming: unary, server-stream, client-stream, bi-directional stream
+//
+// Interview: "How do you evolve a Proto schema without breaking clients?"
+// Rule: Never change field numbers. Adding new fields is always safe.
+// Old clients ignore unknown fields. New clients get the new data.
+// This is called BACKWARD COMPATIBILITY by default.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Service Definition ──────────────────────────────────────────────────────
+service EmployeeAnalyticsService {
+    // Unary RPC: one request → one response (like HTTP REST)
+    rpc RecordEmployeeEvent(EmployeeEventRequest) returns (EmployeeEventResponse);
+
+    // Server-streaming RPC: one request → stream of responses
+    // Use case: "Give me all analytics events for employee X as a stream"
+    // Interview: "When do you use server-side streaming?"
+    // → Large result sets, real-time dashboards, live log tailing
+    rpc StreamEmployeeEvents(StreamEventsRequest) returns (stream EmployeeEventRecord);
+
+    // Unary RPC: get aggregated analytics
+    rpc GetEmployeeAnalytics(AnalyticsRequest) returns (AnalyticsResponse);
+
+    // Unary RPC: department headcount
+    rpc GetDepartmentHeadcount(DepartmentRequest) returns (DepartmentHeadcountResponse);
+
+    // Bi-directional streaming: client streams events, server streams back ack + enriched analytics
+    // Interview: "When do you use bidirectional streaming?"
+    // → Chat, real-time data pipelines, trading systems, IoT telemetry ingestion
+    rpc StreamBatchEvents(stream EmployeeEventRequest) returns (stream BatchEventAck);
+}
+
+// ─── Messages ────────────────────────────────────────────────────────────────
+
+// Event types that analytics service tracks
+//
+// Interview: "What's the benefit of using enums in Proto?"
+// → Type safety, self-documenting, no magic strings, zero serialization cost
+enum EmployeeEventType {
+    EMPLOYEE_EVENT_TYPE_UNSPECIFIED = 0; // Always have a zero/default value
+    EMPLOYEE_CREATED = 1;
+    EMPLOYEE_UPDATED = 2;
+    EMPLOYEE_DELETED = 3;
+    EMPLOYEE_PROMOTED = 4;
+    EMPLOYEE_SALARY_CHANGED = 5;
+    EMPLOYEE_DEPARTMENT_TRANSFERRED = 6;
+    EMPLOYEE_ONBOARDING_COMPLETED = 7;
+}
+
+// Request to record an analytics event
+message EmployeeEventRequest {
+    string employee_id = 1;           // Field numbers must NEVER change
+    string tenant_id = 2;
+    EmployeeEventType event_type = 3;
+    string department = 4;
+    string performed_by = 5;
+    int64 event_timestamp_ms = 6;     // Unix timestamp in milliseconds
+    map<string, string> metadata = 7; // Flexible key-value for extra data
+    string correlation_id = 8;        // For distributed tracing linkage
+    string trace_id = 9;              // OpenTelemetry trace ID propagation
+}
+
+// Response after recording an event
+message EmployeeEventResponse {
+    bool success = 1;
+    string event_id = 2;              // Server-assigned event ID
+    string message = 3;
+    int64 processed_at_ms = 4;
+}
+
+// A recorded event (for streaming)
+message EmployeeEventRecord {
+    string event_id = 1;
+    string employee_id = 2;
+    string tenant_id = 3;
+    EmployeeEventType event_type = 4;
+    string department = 5;
+    string performed_by = 6;
+    int64 event_timestamp_ms = 7;
+    map<string, string> metadata = 8;
+}
+
+// Request to stream events for a specific employee
+message StreamEventsRequest {
+    string employee_id = 1;
+    string tenant_id = 2;
+    int64 from_timestamp_ms = 3;      // 0 = from beginning
+    int64 to_timestamp_ms = 4;        // 0 = until now
+    int32 limit = 5;                  // 0 = no limit
+}
+
+// Analytics aggregation request
+message AnalyticsRequest {
+    string tenant_id = 1;
+    int64 from_timestamp_ms = 2;
+    int64 to_timestamp_ms = 3;
+    string department = 4;            // Empty = all departments
+}
+
+// Aggregated analytics response
+message AnalyticsResponse {
+    int32 total_employees = 1;
+    int32 new_hires = 2;
+    int32 promotions = 3;
+    int32 departures = 4;
+    int32 transfers = 5;
+    double avg_salary_change_pct = 6;
+    map<string, int32> events_by_department = 7;
+    map<string, int32> events_by_type = 8;
+    repeated DepartmentSummary department_summaries = 9;
+}
+
+// Per-department breakdown
+message DepartmentSummary {
+    string department = 1;
+    int32 headcount = 2;
+    int32 events = 3;
+    int32 new_hires = 4;
+    int32 departures = 5;
+}
+
+// Department headcount request
+message DepartmentRequest {
+    string tenant_id = 1;
+    string department = 2;            // Empty = all departments
+}
+
+// Department headcount response
+message DepartmentHeadcountResponse {
+    map<string, int32> headcount_by_department = 1;
+    int32 total = 2;
+    int64 as_of_timestamp_ms = 3;
+}
+
+// Batch event acknowledgement (used in bi-directional streaming)
+message BatchEventAck {
+    string event_id = 1;
+    bool accepted = 2;
+    string reason = 3;                // If not accepted, why
+    int64 ack_timestamp_ms = 4;
+}

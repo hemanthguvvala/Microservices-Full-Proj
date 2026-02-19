@@ -22,4 +22,9 @@ public interface EventStoreRepository extends JpaRepository<EventStore, Long> {
 
     /** Get all events of a specific type */
     List<EventStore> findByEventTypeOrderByCreatedAtDesc(String eventType);
+
+    /** Get all events for an aggregate AFTER a specific version (delta replay after snapshot) */
+    List<EventStore> findByAggregateIdAndAggregateTypeAndEventVersionGreaterThanOrderByEventVersionAsc(
+            String aggregateId, String aggregateType, Long afterVersion);
+
 }

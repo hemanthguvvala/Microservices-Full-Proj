@@ -1,0 +1,136 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# analytics-service Kubernetes Deployment
+# gRPC server (port 9090) + HTTP actuator (port 8085)
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-service
+  namespace: employee-platform
+  labels:
+    app: analytics-service
+    component: analytics
+    protocol: grpc
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: analytics-service
+  template:
+    metadata:
+      labels:
+        app: analytics-service
+        component: analytics
+        protocol: grpc
+      annotations:
+        # Prometheus scraping for gRPC + HTTP metrics
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8085"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      containers:
+        - name: analytics-service
+          image: employee-platform/analytics-service:latest
+          ports:
+            # HTTP port for REST actuator + health probes
+            - name: http
+              containerPort: 8085
+              protocol: TCP
+            # gRPC port — HTTP/2, binary protocol
+            # Note: Must be exposed separately from HTTP/1.1 port
+            - name: grpc
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: SPRING_DATASOURCE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: analytics-db-secret
+                  key: jdbc-url
+            - name: KAFKA_SERVERS
+              valueFrom:
+                configMapKeyRef:
+                  name: kafka-config
+                  key: bootstrap-servers
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector:4318"
+            - name: EUREKA_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: eureka-config
+                  key: service-url
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8085
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8085
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+# ─── Service — exposes BOTH HTTP and gRPC ports ───────────────────────────────
+# Interview: "How do you expose a gRPC service in Kubernetes?"
+# → Use a separate Service port for gRPC (port 9090).
+#   If using an Ingress, the ingress MUST support HTTP/2 (gRPC uses HTTP/2).
+#   Nginx ingress: add nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+#   AWS ALB: use HTTP/2 target group protocol setting.
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics-service
+  namespace: employee-platform
+  labels:
+    app: analytics-service
+spec:
+  selector:
+    app: analytics-service
+  ports:
+    # HTTP port for health, metrics, REST endpoints
+    - name: http
+      port: 8085
+      targetPort: 8085
+      protocol: TCP
+    # gRPC port — registered in Eureka metadata so clients can discover it
+    - name: grpc
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  type: ClusterIP
+---
+# ─── gRPC Ingress ─────────────────────────────────────────────────────────────
+# Separate ingress for gRPC — requires HTTP/2 passthrough
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: analytics-grpc-ingress
+  namespace: employee-platform
+  annotations:
+    # Tell nginx to use HTTP/2 backend (required for gRPC)
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    nginx.ingress.kubernetes.io/http2-push-preload: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: analytics-grpc.employee-platform.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: analytics-service
+                port:
+                  number: 9090

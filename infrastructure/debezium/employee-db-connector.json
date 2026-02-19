@@ -1,0 +1,52 @@
+{
+  "name": "employee-db-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "postgres-employee",
+    "database.port": "5432",
+    "database.user": "${DB_USER:postgres}",
+    "database.password": "${DB_PASSWORD:secret}",
+    "database.dbname": "employee_db",
+    "database.server.name": "employee_db",
+
+    "_comment_plugin": "pgoutput is PostgreSQL's built-in logical decoding plugin (v10+). Alternative: wal2json (older plugin for LogMiner-style output)",
+    "plugin.name": "pgoutput",
+
+    "_comment_slot": "Replication slot name — PostgreSQL holds WAL data until Debezium reads it. Keep slot name unique per connector.",
+    "slot.name": "debezium_employee_slot",
+
+    "_comment_publication": "PostgreSQL publication — defines which tables to stream. 'ALL_TABLES' captures every table.",
+    "publication.name": "debezium_employee_pub",
+
+    "_comment_tables": "Comma-separated list of tables to capture. Only these tables generate CDC events.",
+    "table.include.list": "public.employees,public.outbox_events,public.event_store",
+
+    "_comment_topic": "Each table's CDC events go to: {server.name}.{schema}.{table}",
+    "topic.prefix": "cdc",
+
+    "_comment_snapshot": "How to handle the initial snapshot of existing data.\n  initial: snapshot all rows first, then stream new changes\n  never: skip snapshot, only stream changes from now on\n  schema_only: capture schema but no existing data rows",
+    "snapshot.mode": "initial",
+
+    "_comment_heartbeat": "Heartbeat messages keep the WAL slot alive when no DML activity. Prevents WAL bloat when Debezium is idle.",
+    "heartbeat.interval.ms": "10000",
+    "heartbeat.action.query": "INSERT INTO public.debezium_heartbeat (ts) VALUES (NOW()) ON CONFLICT DO NOTHING",
+
+    "_comment_outbox_router": "Debezium Outbox Event Router — transforms outbox table CDC events into business domain events.\nInstead of raw INSERT events, it publishes structured domain events routed to the right Kafka topic.",
+    "transforms": "outbox",
+    "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+    "transforms.outbox.table.fields.additional.placement": "correlation_id:header,tenant_id:header",
+    "transforms.outbox.route.topic.replacement": "employee.${routedByValue}.events",
+
+    "_comment_key_converter": "Use string for key (employee ID), JSON for value — simpler than Avro for dev. Use Avro in production for schema evolution.",
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+
+    "_comment_decimal": "Numeric precision: double for performance vs string for exact financial values. Use DOUBLE for metrics, STRING for salary fields.",
+    "decimal.handling.mode": "double",
+
+    "_comment_time": "Timestamps as epoch milliseconds — easier to consume than PostgreSQL timestamp strings.",
+    "time.precision.mode": "connect",
+    "timezone": "UTC"
+  }
+}

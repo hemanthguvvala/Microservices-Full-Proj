@@ -1,0 +1,82 @@
+version: "3.8"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Debezium CDC (Change Data Capture) — docker-compose fragment
+#
+# What is CDC / Debezium?
+# Instead of polling the outbox table every few seconds, Debezium reads the
+# PostgreSQL Write-Ahead Log (WAL / binlog) directly. Every INSERT/UPDATE/DELETE
+# is captured as a Kafka event in real time.
+#
+# Interview: "What's the difference between polling-based Outbox and CDC?"
+# ┌──────────────────────┬──────────────────────────┬──────────────────────────┐
+# │                      │ Polling Outbox (ours)    │ CDC / Debezium           │
+# ├──────────────────────┼──────────────────────────┼──────────────────────────┤
+# │ Mechanism            │ SELECT WHERE processed=F │ Read PostgreSQL WAL      │
+# │ Latency              │ ~1-5s (poll interval)    │ Sub-second               │
+# │ DB load              │ Polling adds load        │ Near zero (WAL tailing)  │
+# │ Schema changes       │ App code change needed   │ Automatic capture        │
+# │ Data type support    │ Serialized JSON           │ Native types preserved  │
+# │ Historical replay    │ Not possible             │ Replay from WAL offset   │
+# │ Setup complexity     │ Simple                   │ Requires WAL config      │
+# └──────────────────────┴──────────────────────────┴──────────────────────────┘
+#
+# When to use CDC:
+# → Real-time sync between PostgreSQL and Elasticsearch/Redis/another DB
+# → Microservices that need to react to ANY table change (not just outbox)
+# → Zero-latency event streaming requirement
+# → You want to avoid modifying application code for event publishing
+#
+# Interview: "Can you use Debezium alongside your Outbox pattern?"
+# → Yes — Debezium can watch the outbox table itself (Debezium Outbox Router).
+#   This gives you: exact-once outbox semantics + WAL-based (no polling).
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # Kafka Connect — the container that runs Debezium connectors
+  kafka-connect:
+    image: debezium/connect:2.5
+    container_name: kafka-connect
+    depends_on:
+      - kafka
+      - postgres-employee
+    ports:
+      - "8083:8083"       # Kafka Connect REST API (manage connectors)
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: debezium-cdc-group
+      CONFIG_STORAGE_TOPIC: debezium_connect_configs
+      OFFSET_STORAGE_TOPIC: debezium_connect_offsets
+      STATUS_STORAGE_TOPIC: debezium_connect_status
+      # AVRO schema registry integration (if Avro is used for CDC events)
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+    networks:
+      - microservices-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/connectors"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Connector Registration (init container pattern) ──────────────────────────
+  # Registers the PostgreSQL CDC connector via Kafka Connect REST API
+  # after kafka-connect is healthy.
+  debezium-connector-init:
+    image: curlimages/curl:latest
+    container_name: debezium-connector-init
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+    command: >
+      sh -c "
+        echo 'Registering Debezium PostgreSQL connector...' &&
+        curl -s -X POST http://kafka-connect:8083/connectors \
+          -H 'Content-Type: application/json' \
+          -d @/connectors/employee-db-connector.json &&
+        echo 'Connector registered!'
+      "
+    volumes:
+      - ./infrastructure/debezium:/connectors:ro
+    networks:
+      - microservices-net

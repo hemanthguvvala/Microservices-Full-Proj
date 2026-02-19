@@ -8,10 +8,10 @@ const ARCH_DATA = {
     springBoot: '3.2.0',
     springCloud: '2023.0.0',
     java: 17,
-    totalServices: 6,
-    totalClasses: 173,
-    totalPatterns: 42,
-    totalTechnologies: 89
+    totalServices: 7,
+    totalClasses: 191,
+    totalPatterns: 49,
+    totalTechnologies: 98
   },
 
   services: {
@@ -385,12 +385,13 @@ const ARCH_DATA = {
         { name: 'api-gateway', image: 'build: ./api-gateway-service', port: '8080', purpose: 'API routing' },
         { name: 'frontend', image: 'build: ./frontend-react', port: '3000', purpose: 'React UI' },
         { name: 'frontend-angular', image: 'build: ./frontend-angular', port: '4201', purpose: 'Angular UI' },
+        { name: 'analytics-service', image: 'build: ./analytics-service', port: '8085 (HTTP) + 9090 (gRPC)', purpose: 'gRPC analytics — all 4 streaming modes' },
       ],
     },
     kubernetes: {
       base: ['namespace.yaml', 'configmap.yaml', 'secrets.yaml', 'ingress.yaml'],
       infrastructure: ['postgresql.yaml', 'redis.yaml', 'kafka.yaml', 'mongodb-elasticsearch.yaml'],
-      services: ['eureka-server.yaml', 'config-server.yaml', 'employee-service.yaml', 'payroll-service.yaml', 'notification-service.yaml', 'api-gateway.yaml', 'frontend.yaml', 'frontend-angular.yaml'],
+      services: ['eureka-server.yaml', 'config-server.yaml', 'employee-service.yaml', 'payroll-service.yaml', 'notification-service.yaml', 'api-gateway.yaml', 'analytics-service.yaml', 'frontend.yaml', 'frontend-angular.yaml'],
       monitoring: ['prometheus-grafana.yaml'],
       overlays: ['dev/kustomization.yaml', 'prod/kustomization.yaml'],
     },
@@ -453,6 +454,14 @@ const ARCH_DATA = {
     { name: 'Chaos Engineering', category: 'Resilience', where: 'k8s/chaos/', description: 'Chaos Mesh experiments: PodChaos kills pods, NetworkChaos injects latency/packet loss, StressChaos creates CPU/memory pressure, HTTPChaos injects 503s.', interview: 'Chaos Engineering principle: inject failures in controlled way to find weaknesses before they find you. Chaos Mesh is K8s-native CRD-based. PodChaos tests restart resilience. NetworkChaos (200ms latency) triggers circuit breakers. CPU stress validates KEDA autoscaling. Schedule chaos drills in staging on a cron.' },
     { name: 'SLO / Error Budget', category: 'Observability', where: 'monitoring/prometheus/alerts/', description: 'Recording rules compute 30-day success rates. Multi-window burn rate alerts: 14x burn rate → 2h to exhaustion (page). Error budget consumed = 1 - 30d_success_rate.', interview: 'SLO = Service Level Objective. Error budget = 100% - SLO%. If SLO=99.9%, budget=0.1%=43.2min/month. Burn rate alert: if consuming budget 14x faster than normal → exhausted in 2h → page immediately. This is the Google SRE burn rate alerting model.' },
     { name: 'External Secrets / Zero-Trust', category: 'Security', where: 'k8s/security/', description: 'External Secrets Operator syncs from AWS Secrets Manager/Vault to K8s. No plaintext secrets in Git or K8s manifests. Secrets rotated on configurable schedule.', interview: 'Zero-trust: never hardcode secrets. External Secrets Operator uses IRSA (IAM Roles for Service Accounts) on EKS — pods get AWS credentials via K8s service account annotation. Rotation: refreshInterval=1h means secrets auto-rotate without pod restart.' },
+    { name: 'gRPC — Unary RPC', category: 'Integration', where: 'analytics-service, employee-microservice', description: 'employee-service sends a RecordEmployeeEvent unary call to analytics-service over gRPC (HTTP/2 + Protobuf). AnalyticsGrpcClient injects a blocking stub via @GrpcClient.', interview: 'gRPC vs REST: gRPC uses HTTP/2 multiplexing (no head-of-line blocking), binary Protobuf encoding (3–10x smaller than JSON), and strongly-typed contracts (.proto). Deadline propagation: client sets 2s deadline and handles DEADLINE_EXCEEDED gracefully. Service discovery: gRPC stub address = discovery:///analytics-service (Eureka lookup).' },
+    { name: 'gRPC — Server Streaming', category: 'Integration', where: 'analytics-service', description: 'StreamEmployeeEvents RPC streams events back to the client as they arrive. Server calls responseObserver.onNext() for each event then onCompleted().', interview: 'Server streaming: one client request → stream of responses. Use-case: real-time event feeds, large dataset export without buffering everything in memory. Client uses Iterator or blocking iterator over the stream.' },
+    { name: 'gRPC — Bidirectional Streaming', category: 'Integration', where: 'analytics-service', description: 'StreamBatchEvents: client and server both stream concurrently. Client sends events, server sends back acknowledgements. Implemented with StreamObserver on both sides.', interview: 'BiDi streaming: both sides send independently on the same HTTP/2 stream. Use-cases: chat, real-time analytics ingestion, bidirectional sync. Requires careful back-pressure handling — server can call onError() to signal client to slow down.' },
+    { name: 'Protocol Buffers (Protobuf)', category: 'Serialization', where: 'analytics-service, employee-microservice', description: 'Schema-first binary serialization. .proto file defines messages and service RPCs. protobuf-maven-plugin compiles .proto → Java stubs at build time.', interview: 'Protobuf vs JSON: binary encoding (field IDs, varint), schema enforced at compile time, backward-compatible via field numbering. Adding new fields with new numbers = backward compatible. Removing fields = use reserved keyword. Code generation = no runtime reflection.' },
+    { name: 'Change Data Capture (CDC)', category: 'Integration', where: 'infrastructure/debezium/', description: 'Debezium PostgreSQL connector reads WAL (Write-Ahead Log) changes via pgoutput plugin. Publishes row-level changes to Kafka topics (cdc.public.employees, cdc.public.outbox_events).', interview: 'CDC vs polling outbox: CDC has sub-second latency (reads WAL directly) vs polling adds delay. CDC is also lower DB load — no SELECT polling. pgoutput is built into PostgreSQL 10+ (no extra plugin). Replication slot persists LSN position so no events are missed on restart. Trade-off: Debezium connector must run continuously; connector offset stored in Kafka.' },
+    { name: 'Event Sourcing Snapshots', category: 'Data', where: 'employee-microservice', description: 'EventSnapshot entity stores serialized aggregate state at a given version. replayAggregate() loads the latest snapshot then only replays delta events since that version (O(delta) instead of O(n)).', interview: 'Without snapshots: replaying 10,000 events on every read = O(n) and slow. Snapshot optimization: store state every 100 events (SNAPSHOT_THRESHOLD). On replay: load snapshot at version V, apply only events V+1..HEAD. Snapshot stored as JSON in stateJson column. Auto-triggered in checkAndTakeSnapshot() after every appendEvent().' },
+    { name: 'MDC Context Propagation (Async)', category: 'Observability', where: 'employee-microservice/config/AsyncConfig.java', description: 'MdcTaskDecorator captures MDC map and RequestAttributes on the calling thread, then restores them on the async worker thread. Ensures correlationId, tenantId propagate through @Async methods.', interview: 'Problem: ThreadLocal (which MDC uses) is NOT copied to new threads by default. Solution: TaskDecorator — a hook that wraps each Runnable submitted to the thread pool. Pattern: capture MDC.getCopyOfContextMap() before submit, set on worker thread, clear in finally. Same approach works for SecurityContextHolder.' },
+    { name: 'Distributed Rate Limiting with KeyResolver', category: 'Resilience', where: 'api-gateway-service/config/GatewayRateLimiterConfig.java', description: 'GatewayRateLimiterConfig provides 3 KeyResolver strategies: JWT-user (from Bearer token), IP-based, API-key (X-API-Key header). 3 Redis rate limiter tiers: default (10/s), analytics (2/s), health (1000/s).', interview: 'Spring Cloud Gateway Redis rate limiter implements token bucket algorithm distributed across all gateway instances via Redis. KeyResolver determines per-entity limits — user-based limits prevent one user from starving others. Burst capacity allows short spikes (2x replenish rate). Why 3 tiers: analytics endpoints are expensive (gRPC calls), health checks should never be rate-limited.' },
   ],
 
   techStack: [
@@ -485,13 +494,17 @@ const ARCH_DATA = {
       { name: 'Apache Kafka', color: '#f0883e', desc: 'Event streaming between services' },
       { name: 'Apache ZooKeeper', color: '#f0883e', desc: 'Kafka cluster coordination' },
       { name: 'Spring WebSocket + STOMP', color: '#3fb950', desc: 'Real-time push notifications' },
+      { name: 'gRPC (grpc-spring-boot-starter)', color: '#58a6ff', desc: 'Binary RPC over HTTP/2 — analytics-service, all 4 streaming modes' },
+      { name: 'Protocol Buffers 3.25', color: '#58a6ff', desc: 'Schema-first binary serialization, compile-time code gen' },
+      { name: 'Debezium CDC (PostgreSQL)', color: '#f0883e', desc: 'Change Data Capture via WAL / pgoutput plugin' },
     ]},
     { category: 'Observability', items: [
       { name: 'Prometheus', color: '#f0883e', desc: 'Metrics collection & alerting' },
       { name: 'Grafana', color: '#f0883e', desc: 'Metrics dashboards & visualization' },
-      { name: 'Zipkin', color: '#39d2c0', desc: 'Distributed tracing' },
-      { name: 'Micrometer', color: '#3fb950', desc: 'Metrics facade (Prometheus + Zipkin)' },
+      { name: 'OpenTelemetry (OTLP, wired)', color: '#39d2c0', desc: 'micrometer-tracing-bridge-otel + opentelemetry-exporter-otlp in employee/payroll/notification pom.xml' },
+      { name: 'Micrometer', color: '#3fb950', desc: 'Metrics facade (Prometheus + OTel)' },
       { name: 'ELK Stack (Logstash + Kibana)', color: '#d29922', desc: 'Centralized logging' },
+      { name: 'MDC TaskDecorator', color: '#3fb950', desc: 'Async thread context propagation — correlationId across @Async boundaries' },
     ]},
     { category: 'DevOps & Infrastructure', items: [
       { name: 'Docker + Docker Compose', color: '#58a6ff', desc: '19 containerized services' },
@@ -999,6 +1012,86 @@ const ARCH_DATA = {
     Note over React,Keycloak: Token refresh (before expiry)
     React->>Keycloak: POST /token {grant_type=refresh_token, refresh_token}
     Keycloak->>React: New access_token (refresh token rotation)`,
+
+    grpcFlow: `sequenceDiagram
+    participant ES as 👤 employee-service
+    participant GC as AnalyticsGrpcClient
+    participant AS as 📊 analytics-service (gRPC :9090)
+    participant DB as 🐘 PostgreSQL
+
+    Note over ES,AS: gRPC — Unary RPC (fire-and-forget analytics)
+    ES->>GC: recordEvent(employeeId, EMPLOYEE_CREATED)
+    GC->>AS: RecordEmployeeEvent (Protobuf, HTTP/2)
+    AS->>DB: INSERT analytics_events
+    AS-->>GC: EmployeeEventResponse{success, eventId}
+    GC-->>ES: success (or fallback: log + continue on error)
+
+    Note over ES,AS: gRPC — Server Streaming
+    ES->>AS: StreamEmployeeEvents(tenantId, eventType)
+    loop For each matching event
+        AS-->>ES: EmployeeEvent (streamed)
+    end
+    AS-->>ES: onCompleted()
+
+    Note over ES,AS: gRPC — Bidirectional Streaming
+    ES->>AS: StreamBatchEvents (open stream)
+    loop Batch of events
+        ES->>AS: EmployeeEvent
+        AS-->>ES: BatchEventAck{eventId, processed}
+    end
+    ES->>AS: onCompleted()
+    AS-->>ES: onCompleted()
+
+    classDef emp fill:#1a2a1a,stroke:#3fb950,color:#3fb950
+    classDef anl fill:#1a1a2a,stroke:#58a6ff,color:#58a6ff`,
+
+    cdcFlow: `sequenceDiagram
+    participant PG as 🐘 PostgreSQL (WAL)
+    participant DC as Debezium Connector
+    participant K as 📨 Kafka
+    participant AN as 📊 analytics-service
+    participant ES as 🔎 Elasticsearch
+
+    Note over PG,DC: CDC via pgoutput replication plugin (built-in PostgreSQL 10+)
+    PG->>DC: WAL event: INSERT employees (LSN position)
+    DC->>K: Publish to cdc.public.employees topic
+    DC->>K: Publish to cdc.public.outbox_events topic
+
+    Note over K,AN: analytics-service consumes CDC events
+    K->>AN: EmployeeEventKafkaConsumer (@KafkaListener, manual ACK)
+    AN->>AN: recordEvent(employeeId, EMPLOYEE_CREATED)
+    AN-->>K: ack()
+
+    Note over K,ES: Elasticsearch indexer consumes CDC for CQRS read model
+    K->>ES: Index employee document (search read model)
+
+    Note over DC: On restart: resume from last committed LSN offset in Kafka`,
+
+    websocketFlow: `sequenceDiagram
+    participant UI as ⚛️ React (useWebSocket hook)
+    participant WS as Spring WebSocket
+    participant NS as 🔔 Notification Service
+    participant K as 📨 Kafka
+
+    Note over UI,WS: Connection establishment
+    UI->>WS: WS Upgrade (HTTP → WebSocket)
+    WS-->>UI: 101 Switching Protocols
+    UI->>UI: startHeartbeat() every 30s
+    UI->>WS: {type: ping}
+    WS-->>UI: {type: pong}
+
+    Note over NS,K: Backend notification flow
+    K->>NS: Consume employee-events topic
+    NS->>NS: Strategy.send() → save to DB
+    NS->>WS: SimpMessagingTemplate.convertAndSend(/topic/notifications)
+    WS-->>UI: {type: EMPLOYEE_CREATED, data: {...}}
+
+    Note over UI: useWebSocket hook handles reconnect
+    UI->>UI: WS disconnects (network blip)
+    UI->>UI: exponential backoff (1s, 2s, 4s...)
+    UI->>WS: Reconnect attempt
+    WS-->>UI: 101 Switching Protocols
+    UI->>UI: onReconnect callback — re-subscribe`,
 
     bffAggregation: `sequenceDiagram
     participant SPA as ⚛️ React SPA

@@ -1,0 +1,87 @@
+server:
+  port: 8085
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: analytics-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/analytics_db
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:secret}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 3
+      connection-timeout: 20000
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  kafka:
+    bootstrap-servers: ${KAFKA_SERVERS:localhost:9092}
+    consumer:
+      group-id: analytics-employee-consumer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+  config:
+    import: optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}
+
+# ─── gRPC Server Configuration ───────────────────────────────────────────────
+# Interview: "How does gRPC server bind to a port?"
+# net.devh.boot.grpc auto-configures netty HTTP/2 server on grpc.server.port
+# Independent of spring.server.port — two different ports:
+# - HTTP port (8085): REST actuator, health checks
+# - gRPC port (9090): gRPC binary protocol
+grpc:
+  server:
+    port: 9090
+    max-inbound-message-size: 10MB
+    max-inbound-metadata-size: 64KB
+    keep-alive-time: 30s
+    keep-alive-timeout: 10s
+    permit-keep-alive-without-calls: true
+
+# ─── Eureka Discovery ────────────────────────────────────────────────────────
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    metadata-map:
+      grpc.port: ${grpc.server.port}   # Advertise gRPC port in Eureka metadata
+
+# ─── OpenTelemetry Tracing ───────────────────────────────────────────────────
+# Interview: "How does trace context flow through gRPC?"
+# → OpenTelemetry gRPC interceptors auto-inject/extract W3C TraceContext headers
+#   into gRPC metadata. No manual work needed — just include the OTel starter.
+management:
+  tracing:
+    sampling:
+      probability: 1.0   # 100% sampling in dev; use 0.1 in prod
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+
+analytics:
+  kafka:
+    topic:
+      employee-events: employee-events
+    consumer:
+      group-id: analytics-employee-consumer
+
+logging:
+  pattern:
+    console: "%d{ISO8601} [%thread] %highlight(%-5level) %cyan(%logger{36}) - [%X{correlationId}] [%X{traceId}] %msg%n"
