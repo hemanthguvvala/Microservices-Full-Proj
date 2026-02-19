@@ -1,0 +1,876 @@
+# Deep-Dive Interview Prep — Security · Resilience4j · Messaging · Threads · SQL
+
+> Every answer below is grounded in **actual code in this repo**.  
+> File references are given so you can pull up the code during interviews.
+
+---
+
+## TABLE OF CONTENTS
+
+1. [Spring Security — JWT + Role-Based Auth](#1-spring-security)
+2. [Circuit Breaker — Resilience4j (all 4 modules)](#2-resilience4j-circuit-breaker)
+3. [RabbitMQ — Why it's NOT here (and Kafka instead)](#3-rabbitmq-vs-kafka)
+4. [Threads — @Async, ThreadPool, MDC, Virtual Threads](#4-threads)
+5. [SQL — Window Functions, CTEs, Indexes, Transactions, Locking](#5-sql)
+
+---
+
+## 1. Spring Security
+
+### What's Implemented
+
+| Feature | File |
+|---|---|
+| JWT Authentication Filter | `employee-microservice/.../security/JwtAuthenticationFilter.java` |
+| JWT Token Provider (HMAC-SHA256) | `employee-microservice/.../security/JwtTokenProvider.java` |
+| Security Filter Chain + CORS | `employee-microservice/.../config/SecurityConfig.java` |
+| Role Entity (ROLE_USER / ADMIN / MANAGER) | `employee-microservice/.../model/Role.java` |
+| Register + Login endpoints | `employee-microservice/.../controller/AuthController.java` |
+| Profile-based security (dev/prod) | `payroll-microservice/.../config/SecurityConfig.java` |
+
+### Architecture — Request Flow
+
+```
+HTTP Request
+    │
+    ▼
+JwtAuthenticationFilter (OncePerRequestFilter)
+    │  1. Extract "Bearer <token>" from Authorization header
+    │  2. JwtTokenProvider.validateToken() — verifies HMAC-SHA256 signature
+    │  3. Extract username from Claims.getSubject()
+    │  4. Load UserDetails (user + roles from DB)
+    │  5. Create UsernamePasswordAuthenticationToken(userDetails, null, authorities)
+    │  6. Set into SecurityContextHolder
+    ▼
+SecurityFilterChain.authorizeHttpRequests()
+    │  /api/auth/**          → permitAll()
+    │  /actuator/health      → permitAll()
+    │  /actuator/**          → hasRole("ADMIN")   ← role-based
+    │  /api/v1/employees/**  → authenticated()
+    │  anyRequest()          → authenticated()
+    ▼
+Controller / Service
+```
+
+### Role-Based Access Control
+
+**Three roles defined in `Role.java`:**
+
+```java
+public enum RoleName {
+    ROLE_USER,     // read-only employee access
+    ROLE_ADMIN,    // full access including /actuator/**
+    ROLE_MANAGER   // can approve payroll, assign roles
+}
+```
+
+**Why `ROLE_` prefix?**  
+Spring Security's `hasRole("ADMIN")` automatically prepends `ROLE_` to check.  
+`hasAuthority("ROLE_ADMIN")` checks the exact string.  
+So `hasRole("ADMIN")` == `hasAuthority("ROLE_ADMIN")`.
+
+**Method-level security enabled:**
+```java
+@EnableMethodSecurity   // on SecurityConfig
+// Enables:
+//   @PreAuthorize("hasRole('ADMIN')")
+//   @PostAuthorize("returnObject.username == authentication.name")
+//   @Secured("ROLE_ADMIN")
+```
+
+**Why public registration can't give ROLE_ADMIN:**
+```java
+// AuthController.java — register()
+// Comment says explicitly:
+// "Privilege escalation vulnerability. Any attacker could register as admin.
+//  Role elevation must require authorization from an existing privileged user."
+Role userRole = roleRepository.findByName(Role.RoleName.ROLE_USER).orElseThrow();
+roles.add(userRole);  // Always ROLE_USER only
+```
+
+### JWT Implementation Details
+
+**Token generation — `JwtTokenProvider.java`:**
+```java
+// HMAC-SHA256 (HS256) signing key
+// Key must be ≥ 256 bits (32 bytes) — enforced in @PostConstruct
+this.key = Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
+
+// Token structure: header.payload.signature
+Jwts.builder()
+    .subject(username)
+    .issuedAt(now)
+    .expiration(expiryDate)     // from jwt.expiration config
+    .signWith(key)
+    .compact();
+```
+
+**Token validation — handles all failure cases:**
+```java
+} catch (SecurityException ex)     { /* Invalid signature    */ }
+} catch (MalformedJwtException ex)  { /* Tampered token       */ }
+} catch (ExpiredJwtException ex)    { /* Token expired        */ }
+} catch (UnsupportedJwtException ex){ /* Wrong algorithm      */ }
+} catch (IllegalArgumentException ex){ /* Empty token         */ }
+```
+
+### CORS Configuration
+
+```java
+// Externalized via @Value — different origins per environment:
+@Value("${app.cors.allowed-origins:http://localhost:3000,http://localhost:5173}")
+private String allowedOrigins;
+
+configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Correlation-ID"));
+configuration.setExposedHeaders(List.of("X-Correlation-ID")); // ← custom header for tracing
+configuration.setAllowCredentials(true);
+configuration.setMaxAge(3600L);  // pre-flight cached for 1 hour
+```
+
+### Session Management — Why STATELESS
+
+```java
+.sessionManagement(session ->
+    session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+```
+
+> **Interview: "Why STATELESS?"**  
+> Microservices run as multiple instances. HTTP sessions are in-memory and not shared across instances. With STATELESS + JWT, any instance can verify any request — the token is self-contained. No session replication needed, perfect for Kubernetes/cloud deployments.
+
+### Payroll — Profile-Based Security
+
+```java
+// SecurityConfig.java in payroll-microservice — two beans:
+@Bean @Profile({"dev", "test", "default"})
+public SecurityFilterChain devSecurityFilterChain(...)
+// → .anyRequest().permitAll() — easy local testing
+
+@Bean @Profile("prod")
+public SecurityFilterChain prodSecurityFilterChain(...)
+// → only actuator/swagger public, /api/** requires authentication
+```
+
+> **Interview: "How do you handle security differences between dev and prod?"**  
+> Use Spring Profile-based `SecurityFilterChain` beans. Dev permits all (developer experience). Prod locks everything down. Zero code changes — just flip the active profile via `SPRING_PROFILES_ACTIVE=prod`.
+
+### Top Interview Q&A — Security
+
+**Q: What's the difference between Authentication and Authorization?**  
+A: Authentication = who you are (verify identity via JWT). Authorization = what you can do (check roles/permissions). `JwtAuthenticationFilter` handles authentication; `SecurityFilterChain.authorizeHttpRequests()` + `@PreAuthorize` handles authorization.
+
+**Q: How does Spring Security's filter chain work?**  
+A: `SecurityFilterChain` is a servlet filter registered in the servlet container. Every HTTP request passes through it before reaching controllers. Filters run in order: CORS → CSRF → Session → AuthFilter → ExceptionTranslation → Authorization.
+
+**Q: What's BCrypt and why use it for passwords?**  
+A: BCrypt is an adaptive password hashing algorithm. It includes a work factor (cost) that makes brute-force exponentially harder as hardware improves. Unlike MD5/SHA, BCrypt is intentionally slow (cost=10 → ~100ms per hash). It also includes a random salt per hash, so identical passwords produce different hashes.
+
+**Q: What is `OncePerRequestFilter`?**  
+A: A Spring base class that guarantees the filter runs exactly once per request (even with request dispatching internally). Without it, a filter could fire multiple times for the same request in some servlet containers.
+
+**Q: How would you add OAuth2 / Keycloak?**  
+A: Add `spring-boot-starter-oauth2-resource-server`, configure `spring.security.oauth2.resourceserver.jwt.issuer-uri=http://keycloak:8080/realms/myrealm`, and replace the custom `JwtAuthenticationFilter` with Spring's built-in JWT decoder. The infrastructure Keycloak config already exists in `infrastructure/keycloak/`.
+
+---
+
+## 2. Resilience4j Circuit Breaker
+
+### What's Implemented
+
+All 4 Resilience4j modules are active on `EmployeeService` and `PayrollService`:
+
+| Module | Annotation | Purpose |
+|---|---|---|
+| Circuit Breaker | `@CircuitBreaker` | Stop calling failing service |
+| Retry | `@Retry` | Retry transient failures with backoff |
+| Rate Limiter | `@RateLimiter` | Throttle calls per time period |
+| Bulkhead | `@Bulkhead` | Limit concurrent calls |
+
+### Configuration (from `application.properties`)
+
+```properties
+# ── CIRCUIT BREAKER ──────────────────────────────────────────────────────────
+resilience4j.circuitbreaker.instances.employeeService.sliding-window-size=10
+resilience4j.circuitbreaker.instances.employeeService.minimum-number-of-calls=5
+resilience4j.circuitbreaker.instances.employeeService.failure-rate-threshold=50
+resilience4j.circuitbreaker.instances.employeeService.slow-call-rate-threshold=50
+resilience4j.circuitbreaker.instances.employeeService.slow-call-duration-threshold=2s
+resilience4j.circuitbreaker.instances.employeeService.wait-duration-in-open-state=10s
+resilience4j.circuitbreaker.instances.employeeService.permitted-number-of-calls-in-half-open-state=3
+resilience4j.circuitbreaker.instances.employeeService.automatic-transition-from-open-to-half-open-enabled=true
+resilience4j.circuitbreaker.instances.employeeService.register-health-indicator=true
+
+# ── RETRY ─────────────────────────────────────────────────────────────────────
+resilience4j.retry.instances.employeeService.max-attempts=3
+resilience4j.retry.instances.employeeService.wait-duration=1s
+resilience4j.retry.instances.employeeService.enable-exponential-backoff=true
+resilience4j.retry.instances.employeeService.exponential-backoff-multiplier=2
+
+# ── RATE LIMITER ──────────────────────────────────────────────────────────────
+resilience4j.ratelimiter.instances.employeeService.limit-for-period=10
+resilience4j.ratelimiter.instances.employeeService.limit-refresh-period=1s
+resilience4j.ratelimiter.instances.employeeService.timeout-duration=0s
+
+# ── BULKHEAD (Semaphore) ───────────────────────────────────────────────────────
+resilience4j.bulkhead.instances.employeeService.max-concurrent-calls=10
+resilience4j.bulkhead.instances.employeeService.max-wait-duration=1s
+
+# ── THREAD POOL BULKHEAD ──────────────────────────────────────────────────────
+resilience4j.thread-pool-bulkhead.instances.employeeService.max-thread-pool-size=4
+resilience4j.thread-pool-bulkhead.instances.employeeService.core-thread-pool-size=2
+resilience4j.thread-pool-bulkhead.instances.employeeService.queue-capacity=100
+```
+
+### Code Pattern — EmployeeService.java
+
+```java
+@CircuitBreaker(name = "employeeService", fallbackMethod = "getAllEmployeesFallback")
+@RateLimiter(name = "employeeService")
+@Bulkhead(name = "employeeService")
+public Page<Employee> getAllEmployees(Pageable pageable) { ... }
+
+@CircuitBreaker(name = "employeeService", fallbackMethod = "getEmployeeByIdFallback")
+@Retry(name = "employeeService")   // 3 attempts, 1s → 2s → 4s exponential
+@RateLimiter(name = "employeeService")
+public Employee getEmployeeById(Long id) { ... }
+```
+
+### Circuit Breaker State Machine
+
+```
+          ┌─────────────────────────────┐
+          │         CLOSED              │ ← Normal operation
+          │  failure-rate tracked in    │   All calls go through
+          │  sliding window (size=10)   │
+          └──────────┬──────────────────┘
+                     │ failure-rate ≥ 50%
+                     │ (5 of last 10 calls failed)
+                     ▼
+          ┌─────────────────────────────┐
+          │          OPEN               │ ← Short-circuit
+          │  All calls immediately      │   Throws CallNotPermittedException
+          │  fail → fallbackMethod()    │   wait-duration = 10s
+          └──────────┬──────────────────┘
+                     │ after 10s (auto-transition)
+                     ▼
+          ┌─────────────────────────────┐
+          │        HALF-OPEN            │ ← Probe recovery
+          │  3 test calls permitted     │
+          │  (permitted-in-half-open=3) │
+          └──────┬──────────────┬───────┘
+     ≥ 50% fail  │              │  < 50% fail
+                 ▼              ▼
+             OPEN again      CLOSED ✓
+```
+
+Key numbers from your config:
+- Trips OPEN after: **5+ failures in a 10-call window** (50% of window=10, minimum=5)
+- Stays OPEN for: **10 seconds**
+- Half-open probe: **3 test calls**
+- Slow call threshold: calls taking **>2s** also count as failures
+
+### Retry with Exponential Backoff
+
+```
+Attempt 1 → fails → wait 1s
+Attempt 2 → fails → wait 2s  (1s × multiplier=2)
+Attempt 3 → fails → give up → fallback
+```
+
+> **Interview: "When should you NOT retry?"**  
+> Never retry 4xx client errors (400 Bad Request, 404 Not Found, 409 Conflict) — retrying them wastes resources and never succeeds. Only retry transient failures: 503 Service Unavailable, network timeouts, connection refused. In this project, `ResourceNotFoundException` should be excluded from retry config.
+
+### Bulkhead — Two Types Explained
+
+**Semaphore Bulkhead** (used here):
+- Runs in the **caller's thread**
+- `max-concurrent-calls=10` → if 10 requests are already in-flight, new ones wait up to `max-wait-duration=1s`, then fail
+- Good for: limiting DB connections, controlling concurrency of expensive operations
+
+**Thread Pool Bulkhead** (also configured):
+- Uses a **separate thread pool** (`max-thread-pool-size=4, core=2, queue=100`)
+- Decouples caller from execution — caller gets a `CompletableFuture`
+- Good for: isolating calls to unstable external services (prevents thread starvation of your main pool)
+
+### Annotation Order Matters
+
+```java
+// Resilience4j applies decorators in this order (outer → inner):
+// Retry ( CircuitBreaker ( RateLimiter ( Bulkhead ( Function ) ) ) )
+//
+// This means:
+// 1. Bulkhead limits concurrent executions
+// 2. RateLimiter limits calls per second
+// 3. CircuitBreaker tracks failures and trips open
+// 4. Retry attempts the full decorated function again
+//    → each retry fires through CB, RL, Bulkhead again
+```
+
+### Payroll Client — also protected
+
+```java
+// payroll → employee-service call via Feign/RestTemplate:
+@CircuitBreaker(name = "employeeService", fallbackMethod = "getEmployeeFallback")
+@Retry(name = "employeeService")
+public EmployeeDto getEmployee(Long employeeId) { ... }
+```
+
+### Top Interview Q&A — Circuit Breaker
+
+**Q: What's the difference between Circuit Breaker and Retry?**  
+A: Retry handles **transient failures** — temporary glitches that self-resolve (retry 3x, it works on attempt 2). Circuit Breaker handles **sustained failures** — if a service is down for 30s, retrying 3x every request is wasteful and amplifies load on an already struggling service. CB opens the circuit and fast-fails all calls until the service recovers.
+
+**Q: What's the difference between Bulkhead and Rate Limiter?**  
+A: Rate Limiter is time-based: max 10 calls per second regardless of how long each takes. Bulkhead is concurrency-based: max 10 calls in-flight simultaneously, regardless of time. You need both: RL prevents bursts; Bulkhead prevents thread pool exhaustion.
+
+**Q: How does Resilience4j compare to Hystrix?**  
+A: Hystrix is in maintenance mode since 2018. Resilience4j is lightweight (functional, no dependencies), supports all 4 patterns, has better Spring Boot integration, and works with Java's functional APIs. Hystrix used thread-pool isolation by default (more overhead); Resilience4j defaults to semaphore (lower overhead, configurable).
+
+**Q: What is the `fallbackMethod`?**  
+A: A same-class method with the same signature + an extra `Throwable` parameter. Called when CB is OPEN or call fails after all retries. Provides a degraded response — e.g., return cached data, an empty list, or a meaningful error. Fallback method names in this project: `getAllEmployeesFallback`, `getEmployeeByIdFallback`, `createEmployeeFallback`, etc.
+
+---
+
+## 3. RabbitMQ vs Kafka
+
+### Short Answer: RabbitMQ is NOT in this project. Kafka is used.
+
+### Detailed Comparison
+
+| | Kafka | RabbitMQ |
+|---|---|---|
+| **Model** | Pull-based log/stream | Push-based message queue |
+| **Message retention** | Configurable (days/forever) | Deleted after consumer ACKs |
+| **Consumer groups** | Multiple groups each read full stream | Message delivered to one consumer |
+| **Ordering** | Per-partition ordering guaranteed | Per-queue ordering (with single consumer) |
+| **Throughput** | Millions/sec | Tens of thousands/sec |
+| **Replay** | Yes — seek to any offset | No — once consumed, gone |
+| **Protocols** | Binary TCP (Kafka protocol) | AMQP, MQTT, STOMP |
+| **Routing** | Topic → Partition by key | Exchange → Queue via binding/routing key |
+| **Use case** | Event streaming, CDC, audit log | Task queues, RPC, complex routing |
+
+### Why Kafka was chosen for this project
+
+This platform uses Kafka because:
+
+1. **Event Sourcing** — events must be replayable to rebuild aggregate state. Kafka retains events; RabbitMQ does not.
+
+2. **CDC / Debezium** — Debezium publishes WAL changes as Kafka topics. The entire CDC pipeline is Kafka-native.
+
+3. **Multi-service fan-out** — `employee.events` topic is consumed by payroll-service, notification-service, analytics-service independently. With Kafka consumer groups, each service reads the full stream. With RabbitMQ, you'd need separate queues per consumer (fanout exchange).
+
+4. **Exactly-once via Outbox** — the Outbox Pattern stores events in PostgreSQL, then a separate publisher polls and sends to Kafka. This guarantees at-least-once delivery with idempotent consumers. Easy to implement with Kafka's topic log.
+
+5. **Audit history** — Kafka topics act as an immutable audit log. You can replay all `employee.events` from offset 0 to reproduce every state change.
+
+### When would you use RabbitMQ instead?
+
+- **Task queues** — background jobs (send email, resize image) where exactly one worker should process each task and messages should be deleted after processing
+- **Complex routing** — different headers/routing keys send messages to different queues (e.g., high-priority vs normal orders)
+- **RPC over messaging** — `reply-to` queue pattern for synchronous-style async calls
+- **Low-volume, low-latency** — if you need sub-millisecond delivery and don't need replay
+
+### Interview Answer
+
+> "RabbitMQ isn't in this project by design. We chose Kafka for three reasons: CDC with Debezium is Kafka-native, Event Sourcing requires message replay which Kafka supports natively via offset management, and our multi-service fan-out (payroll + notification + analytics all consuming the same employee events) is a natural fit for Kafka consumer groups. If we needed a task queue — like background email sending — RabbitMQ would be the right tool. The notification-service's email/SMS dispatch actually is a candidate for RabbitMQ in a future phase."
+
+---
+
+## 4. Threads
+
+### What's Used
+
+| Service | Mechanism | Config | File |
+|---|---|---|---|
+| employee-service | `@Async` + `ThreadPoolTaskExecutor` | core=5, max=10, queue=100 | `AsyncConfig.java` |
+| employee-service | **MDC TaskDecorator** | propagates correlationId | `AsyncConfig.java` |
+| notification-service | `@Async` + `ThreadPoolTaskExecutor` | core=5, max=20, queue=100 | `AsyncConfig.java` |
+| payroll-service | `@Async` + `ThreadPoolTaskExecutor` | core=5, max=10, queue=100 | `AsyncConfig.java` |
+
+### What's NOT Used (and Why)
+
+| Mechanism | Reason not used |
+|---|---|
+| `new Thread()` | Never — no lifecycle management, no pool reuse, no Spring context |
+| `SimpleAsyncTaskExecutor` | Default Spring executor — creates a **new thread per call** — effectively unbounded, no backpressure |
+| Java 21 Virtual Threads | Platform is Java 17 LTS. Virtual threads are a Java 21+ feature. In a future upgrade to Java 21, you could use `Executors.newVirtualThreadPerTaskExecutor()` as the task executor — virtual threads are cheap enough to create one per request |
+| `ForkJoinPool` | Not needed here. ForkJoinPool is for divide-and-conquer parallelism (split large tasks into subtasks). Our async work is I/O-bound, not CPU-bound parallel computation |
+
+### ThreadPoolTaskExecutor — Configuration Explained
+
+```java
+// employee-microservice/config/AsyncConfig.java
+executor.setCorePoolSize(5);        // Always-alive threads (even when idle)
+executor.setMaxPoolSize(10);        // Max threads under high load
+executor.setQueueCapacity(100);     // Tasks queued before new threads created
+executor.setThreadNamePrefix("async-");  // Visible in thread dumps / profilers
+executor.setWaitForTasksToCompleteOnShutdown(true);  // Graceful shutdown
+executor.setAwaitTerminationSeconds(60);             // Wait up to 60s on shutdown
+executor.setTaskDecorator(mdcTaskDecorator());       // MDC propagation
+```
+
+**Thread creation logic:**
+```
+Submit task:
+  ├─ active threads < corePoolSize (5)?  → create new thread immediately
+  ├─ corePoolSize reached?               → queue the task (up to 100)
+  ├─ queue full + active < maxPoolSize?  → create thread up to max (10)
+  └─ queue full + at max (10)?           → CallerRunsPolicy (caller thread executes)
+```
+
+**`CallerRunsPolicy` = built-in backpressure:**  
+When the queue is full and max threads are busy, the HTTP request thread itself runs the task. This naturally slows down incoming requests, acting as backpressure. Alternative policies: `AbortPolicy` (throws exception), `DiscardPolicy` (silently drops).
+
+### MDC TaskDecorator — The Core Problem
+
+**Without TaskDecorator:**
+```
+Thread-1 (HTTP)   MDC = {correlationId="abc123", userId="u42"}
+                            │
+                            │  @Async method submitted to thread pool
+                            ▼
+Thread-5 (pool)   MDC = {}  ← EMPTY! correlationId lost!
+LOG: "Processing employee..." — no trace ID in the log line
+```
+
+**With MDC TaskDecorator (from `AsyncConfig.java`):**
+```java
+return runnable -> {
+    // 1. Capture MDC & RequestAttributes from the CALLING thread (HTTP thread)
+    Map<String, String> callerMdc = MDC.getCopyOfContextMap();
+    RequestAttributes reqAttr = RequestContextHolder.currentRequestAttributes();
+
+    return () -> {
+        try {
+            MDC.setContextMap(callerMdc);          // 2. Restore on worker thread
+            RequestContextHolder.setRequestAttributes(reqAttr);
+            runnable.run();                         // 3. Execute the @Async method
+        } finally {
+            MDC.clear();                           // 4. CRITICAL: clean up!
+            RequestContextHolder.resetRequestAttributes();
+            // Thread pools REUSE threads. Without cleanup, the next task
+            // on this thread would inherit the previous request's MDC.
+        }
+    };
+};
+```
+
+### @Async Rules — 4 Critical Rules
+
+```java
+// Rule 1: @EnableAsync must be on a @Configuration class
+@Configuration
+@EnableAsync
+public class AsyncConfig implements AsyncConfigurer { ... }
+
+// Rule 2: @Async method must be called from ANOTHER bean (not self-invocation)
+// WRONG — proxy bypass:
+public void doSomething() {
+    this.sendNotification();  // Calls directly, NOT through Spring proxy → NOT async
+}
+
+// CORRECT:
+@Autowired NotificationService notificationService;
+public void doSomething() {
+    notificationService.sendNotification();  // Goes through proxy → IS async
+}
+
+// Rule 3: Must return void or CompletableFuture<T>
+@Async
+public CompletableFuture<String> processAsync() {
+    return CompletableFuture.completedFuture("done");
+}
+
+// Rule 4: Cannot be private (proxy can't intercept private methods)
+@Async
+public void sendEmailAsync() { ... }    // ✓ public
+// @Async private void ...              // ✗ won't work
+```
+
+### Java Virtual Threads (Interview Topic — Even if Not Used)
+
+```java
+// Java 21 way to enable virtual threads for Spring MVC:
+// application.properties:
+spring.threads.virtual.enabled=true
+
+// Or manually:
+@Bean
+public Executor taskExecutor() {
+    return Executors.newVirtualThreadPerTaskExecutor();
+}
+```
+
+> **Interview: "What are virtual threads and how do they differ from platform threads?"**  
+> Platform threads are OS threads — creating 10,000 is expensive (stack ~1MB each). Virtual threads are JVM-managed, lightweight (stack grows dynamically, ~few KB). You can create millions. They're ideal for I/O-bound workloads (JDBC, HTTP calls) because the JVM unmounts the virtual thread during blocking I/O and mounts a different one. This fundamentally changes the threading model: instead of a pool of ~200 threads, you can have one-thread-per-request at massive scale. Spring Boot 3.2+ supports virtual threads via `spring.threads.virtual.enabled=true`.
+
+### Top Interview Q&A — Threads
+
+**Q: Why define a custom ThreadPoolTaskExecutor instead of using the default?**  
+A: Spring's default `@Async` executor is `SimpleAsyncTaskExecutor` which creates a **new OS thread per invocation** — unbounded, no pooling, no backpressure. Under load this causes: OOM from too many threads, CPU overhead from context switching, no graceful shutdown. A custom `ThreadPoolTaskExecutor` with bounded pool + queue + `CallerRunsPolicy` gives predictable behavior and backpressure.
+
+**Q: What is `CompletableFuture` chaining?**  
+A: `CompletableFuture` allows non-blocking pipeline composition:
+```java
+CompletableFuture.supplyAsync(() -> fetchEmployee(id), executor)
+    .thenApply(emp -> enrichWithDepartment(emp))
+    .thenCompose(emp -> sendToAnalytics(emp))
+    .exceptionally(ex -> { log.error(...); return fallback; });
+```
+`thenApply` transforms the value; `thenCompose` flattens a nested future; `exceptionally` handles errors. All run on the provided executor without blocking any thread.
+
+**Q: What's the difference between `@Transactional` and `@Async`?**  
+A: `@Transactional` opens a DB transaction bound to the current thread (uses ThreadLocal). `@Async` runs on a different thread — so `@Transactional` context does NOT propagate to `@Async` methods. If you need transactional async work, annotate the `@Async` method itself with `@Transactional`, which starts a new transaction on the worker thread.
+
+---
+
+## 5. SQL
+
+### Files in this repo
+
+| File | Contents |
+|---|---|
+| `sql/advanced-queries.sql` | Window functions, CTEs, complex JOINs, subqueries (489 lines) |
+| `sql/optimization-indexing.sql` | EXPLAIN ANALYZE, index strategies, query optimization (196 lines) |
+| `sql/transactions-concurrency.sql` | Isolation levels, locking, deadlocks (172 lines) |
+| `sql/V5__advanced_schema_features.sql` | Schema: partial indexes, constraints, generated columns (236 lines) |
+
+---
+
+### WINDOW FUNCTIONS
+
+The classic "top 3 per department" question:
+
+```sql
+-- ROW_NUMBER vs RANK vs DENSE_RANK
+SELECT
+    e.first_name, e.last_name, d.name AS department, e.salary,
+    ROW_NUMBER() OVER (PARTITION BY e.department_id ORDER BY e.salary DESC) AS row_num,
+    RANK()       OVER (PARTITION BY e.department_id ORDER BY e.salary DESC) AS rank,
+    DENSE_RANK() OVER (PARTITION BY e.department_id ORDER BY e.salary DESC) AS dense_rank
+FROM employees e
+JOIN departments d ON e.department_id = d.id;
+
+-- Given salaries: 100k, 90k, 90k, 80k
+-- ROW_NUMBER:  1, 2, 3, 4   (always unique — arbitrary tie-break)
+-- RANK:        1, 2, 2, 4   (gaps after ties)
+-- DENSE_RANK:  1, 2, 2, 3   (no gaps)
+```
+
+**Top 3 per department using CTE:**
+```sql
+WITH ranked AS (
+    SELECT e.*, d.name AS dept_name,
+           DENSE_RANK() OVER (PARTITION BY e.department_id ORDER BY e.salary DESC) AS rnk
+    FROM employees e JOIN departments d ON e.department_id = d.id
+)
+SELECT * FROM ranked WHERE rnk <= 3;
+```
+
+**LAG/LEAD — compare with adjacent rows:**
+```sql
+-- Salary compared to previous hire
+SELECT
+    first_name, hire_date, salary,
+    LAG(salary, 1)  OVER (ORDER BY hire_date) AS prev_hire_salary,
+    LEAD(salary, 1) OVER (ORDER BY hire_date) AS next_hire_salary,
+    salary - LAG(salary, 1) OVER (ORDER BY hire_date) AS salary_delta
+FROM employees;
+```
+
+**Running total / cumulative sum:**
+```sql
+SELECT
+    hire_date, salary,
+    SUM(salary) OVER (ORDER BY hire_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_total
+FROM employees;
+```
+
+---
+
+### CTEs (Common Table Expressions)
+
+```sql
+-- Non-recursive: readability + reuse
+WITH dept_avg AS (
+    SELECT department_id, AVG(salary) AS avg_salary
+    FROM employees GROUP BY department_id
+),
+above_avg AS (
+    SELECT e.* FROM employees e
+    JOIN dept_avg da ON e.department_id = da.department_id
+    WHERE e.salary > da.avg_salary
+)
+SELECT * FROM above_avg ORDER BY salary DESC;
+```
+
+**Recursive CTE — hierarchy traversal:**
+```sql
+-- Find all employees under a manager (org chart)
+WITH RECURSIVE org_chart AS (
+    -- Anchor: start with the top-level manager
+    SELECT id, name, manager_id, 0 AS depth
+    FROM employees WHERE manager_id IS NULL
+
+    UNION ALL
+
+    -- Recursive: join each employee to their found manager
+    SELECT e.id, e.name, e.manager_id, oc.depth + 1
+    FROM employees e
+    JOIN org_chart oc ON e.manager_id = oc.id
+)
+SELECT * FROM org_chart ORDER BY depth, name;
+```
+
+> **Interview: "When would you use a recursive CTE?"**  
+> For hierarchical/tree structures: org charts, category trees, bill of materials. The recursive part references the CTE itself, processing each level of the hierarchy until no more rows match.
+
+---
+
+### INDEX STRATEGIES
+
+From `sql/optimization-indexing.sql`:
+
+```sql
+-- B-Tree (default) — equality, range, ORDER BY
+CREATE INDEX idx_employees_email ON employees (email);
+CREATE INDEX idx_payroll_employee_period ON payroll (employee_id, pay_period DESC);
+
+-- Composite Index — put high-cardinality / WHERE columns first
+CREATE INDEX idx_employees_dept_salary ON employees (department_id, salary DESC);
+-- Covers: WHERE department_id = X ORDER BY salary DESC  ← index-only scan
+
+-- Partial Index — only index a subset of rows
+CREATE INDEX idx_active_employees ON employees (department_id, salary)
+    WHERE status = 'ACTIVE';
+-- Index is much smaller → faster scans, less storage
+
+-- Covering Index (INCLUDE) — avoid heap fetch
+CREATE INDEX idx_employees_covering ON employees (department_id)
+    INCLUDE (first_name, last_name, salary);
+-- Query "SELECT first_name, last_name, salary WHERE department_id = X"
+-- can be answered entirely from the index — no table access
+
+-- GIN Index for full-text / JSONB
+CREATE INDEX idx_employee_metadata ON employees USING GIN (metadata);
+-- For: metadata @> '{"skill": "java"}' queries
+```
+
+**EXPLAIN ANALYZE:**
+```sql
+EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)
+SELECT * FROM employees WHERE email = 'john@example.com';
+
+-- Key output to read:
+-- Seq Scan      = table scan (BAD for large tables → needs index)
+-- Index Scan    = using index (GOOD)
+-- Bitmap Index  = multiple indexes combined (mixed selectivity)
+-- Hash Join     = hash-based join (good for large tables, no index)
+-- Nested Loop   = O(n*m) — only good when inner side is small/indexed
+-- actual time=0.042..0.043  ← real execution time in ms
+-- rows=1                    ← actual rows returned
+-- Buffers: shared hit=5     ← pages from cache (good); read=0 means no disk I/O
+```
+
+---
+
+### TRANSACTION ISOLATION LEVELS
+
+From `sql/transactions-concurrency.sql`:
+
+| Level | Dirty Read | Non-Repeatable Read | Phantom Read | When to use |
+|---|---|---|---|---|
+| READ UNCOMMITTED | ✓ possible | ✓ possible | ✓ possible | Never in practice |
+| READ COMMITTED | ✗ prevented | ✓ possible | ✓ possible | **PostgreSQL default** |
+| REPEATABLE READ | ✗ | ✗ prevented | ✓ possible | Reports, salary calc |
+| SERIALIZABLE | ✗ | ✗ | ✗ prevented | Financial operations |
+
+```sql
+-- REPEATABLE READ for salary calculations
+BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+    SELECT SUM(salary) FROM employees WHERE department_id = 1;
+    -- Even if another transaction updates salaries mid-report,
+    -- this transaction sees the original consistent snapshot
+COMMIT;
+```
+
+**Spring `@Transactional` isolation:**
+```java
+@Transactional(isolation = Isolation.REPEATABLE_READ)
+public BigDecimal calculatePayroll(Long departmentId) { ... }
+
+@Transactional(isolation = Isolation.SERIALIZABLE)
+public void processPayment(Long employeeId, BigDecimal amount) { ... }
+```
+
+---
+
+### LOCKING PATTERNS
+
+**Pessimistic Locking — `SELECT FOR UPDATE`:**
+```sql
+BEGIN;
+    SELECT * FROM employees WHERE id = 1 FOR UPDATE;
+    -- Row locked — other transactions WAIT here
+    UPDATE employees SET salary = salary + 5000 WHERE id = 1;
+COMMIT;
+```
+
+**Outbox Pattern — `SKIP LOCKED`** (actually used in this project):
+```sql
+-- Multiple outbox publisher instances can run concurrently:
+SELECT * FROM outbox_events
+WHERE status = 'PENDING'
+ORDER BY created_at LIMIT 10
+FOR UPDATE SKIP LOCKED;   -- ← Skip rows locked by other workers
+                          -- Each worker gets a different batch
+```
+
+**Optimistic Locking — `@Version`** (Spring Data / Hibernate):
+```java
+@Entity
+public class Employee {
+    @Version
+    private Long version;    // Hibernate auto-increments on each update
+}
+// If two transactions read version=1 and both try to update:
+// First commit wins → version becomes 2
+// Second commit throws OptimisticLockException (stale version)
+// Application retries the operation
+```
+
+**Advisory Locks — distributed application-level lock:**
+```sql
+-- Lock a concept, not a row
+SELECT pg_advisory_lock(hashtext('payroll_processing_dept_1'));
+    -- Only one JVM instance can hold this lock at a time
+    -- Other instances block until it's released
+SELECT pg_advisory_unlock(hashtext('payroll_processing_dept_1'));
+
+-- Non-blocking try:
+SELECT pg_try_advisory_lock(hashtext('batch_job'));
+-- Returns true (acquired) or false (already held)
+```
+
+---
+
+### DEADLOCK PREVENTION
+
+```sql
+-- DEADLOCK: Transaction A locks row 1 then tries row 2
+--           Transaction B locks row 2 then tries row 1 → deadlock!
+
+-- Prevention rule: ALWAYS lock rows in the same order
+-- Bad:
+-- Tx A:  LOCK employee_id=1, then LOCK employee_id=2
+-- Tx B:  LOCK employee_id=2, then LOCK employee_id=1  ← deadlock!
+
+-- Good:
+-- Tx A:  LOCK employee_id=1, then LOCK employee_id=2
+-- Tx B:  LOCK employee_id=1, then LOCK employee_id=2  ← Tx B waits, no deadlock
+
+-- In JPA, use consistent update order:
+employees.stream()
+    .sorted(Comparator.comparing(Employee::getId))  // ← always same order
+    .forEach(e -> update(e));
+```
+
+**Postgres detects deadlocks and kills one transaction** (`ERROR: deadlock detected`). Application must:
+1. Catch `org.springframework.dao.DeadlockLoserDataAccessException`
+2. Retry the transaction (Resilience4j `@Retry` handles this)
+
+---
+
+### N+1 QUERY PROBLEM
+
+```java
+// N+1 PROBLEM:
+// For each of N employees, Hibernate issues 1 query for their department
+// = 1 (employees) + N (department per employee) queries
+List<Employee> employees = employeeRepo.findAll(); // 1 query
+employees.forEach(e -> e.getDepartment().getName()); // N more queries!
+
+// FIX 1: JOIN FETCH in JPQL
+@Query("SELECT e FROM Employee e JOIN FETCH e.department WHERE e.status = 'ACTIVE'")
+List<Employee> findAllWithDepartment();
+
+// FIX 2: @EntityGraph
+@EntityGraph(attributePaths = {"department", "roles"})
+List<Employee> findByStatus(String status);
+
+// FIX 3: @BatchSize (Hibernate batches N lazy loads into 1 IN query)
+@BatchSize(size = 30)
+@ManyToOne(fetch = FetchType.LAZY)
+private Department department;
+
+// DETECT N+1: enable Hibernate SQL logging + count the queries
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+```
+
+---
+
+### Top Interview Q&A — SQL
+
+**Q: What's the difference between `INNER JOIN`, `LEFT JOIN`, `FULL JOIN`?**  
+A: `INNER JOIN` — only rows where the join condition matches in both tables. `LEFT JOIN` — all rows from the left table, NULLs for unmatched right rows (use for "employees with or without payroll records"). `FULL OUTER JOIN` — all rows from both tables, NULLs where no match (use for reconciliation queries).
+
+**Q: `WHERE` vs `HAVING` — what's the difference?**  
+A: `WHERE` filters rows **before** grouping, `HAVING` filters **after** grouping. You can't use aggregate functions in `WHERE`:
+```sql
+-- ✗ Wrong:
+WHERE AVG(salary) > 80000
+
+-- ✓ Correct:
+GROUP BY department_id
+HAVING AVG(salary) > 80000
+```
+
+**Q: What's the difference between `DELETE`, `TRUNCATE`, `DROP`?**  
+A: `DELETE` removes rows (one by one, fires triggers, can have `WHERE`, transactional, slow for large tables). `TRUNCATE` removes all rows at once (skips triggers, no `WHERE`, faster but MDL lock). `DROP` removes the entire table structure.
+
+**Q: Explain clustered vs non-clustered index.**  
+A: PostgreSQL uses heap storage — there's no traditional clustered index (unlike SQL Server/MySQL InnoDB). `CLUSTER TABLE employees USING idx_employees_dept` physically reorders the heap on disk to match the index. Subsequent queries using that index become faster (sequential I/O). But it's a one-time operation; inserts unsort the table over time. In practice we use `INCLUDE` and partial indexes instead.
+
+**Q: When does an index NOT help?**  
+A: (1) Low cardinality columns (gender M/F — half the table anyway → seq scan wins). (2) Small tables (seq scan is faster). (3) Function applied to the column in WHERE (`WHERE LOWER(email) = ?` ignores the index on `email` → use functional index). (4) Table scans with > ~15% rows selected (DB optimizer chooses seq scan). (5) Stale statistics — run `ANALYZE employees` to update.
+
+---
+
+## Quick Reference Card
+
+```
+Spring Security:
+  ✓ JWT (HMAC-SHA256) via JJWT library
+  ✓ OncePerRequestFilter → SecurityContextHolder
+  ✓ 3 roles: ROLE_USER, ROLE_ADMIN, ROLE_MANAGER
+  ✓ STATELESS sessions (no HttpSession)
+  ✓ BCrypt password encoding
+  ✓ @EnableMethodSecurity (allows @PreAuthorize)
+  ✓ CORS externalized via @Value
+
+Resilience4j:
+  ✓ @CircuitBreaker   — 50% failure rate → OPEN, 10s → HALF-OPEN
+  ✓ @Retry            — 3 attempts, exponential backoff (1s→2s→4s)
+  ✓ @RateLimiter      — 10 calls/sec
+  ✓ @Bulkhead         — max 10 concurrent + thread-pool variant
+  ✓ FallbackMethod    — graceful degradation on every service method
+  ✓ Health indicators — visible in /actuator/health
+
+Threading:
+  ✓ @Async with custom ThreadPoolTaskExecutor (NOT SimpleAsyncTaskExecutor)
+  ✓ MDC TaskDecorator — propagates correlationId to async threads
+  ✓ CallerRunsPolicy  — backpressure when queue full
+  ✓ Graceful shutdown — await 60s for in-flight tasks
+  ✗ RabbitMQ — not used (Kafka handles all messaging)
+  ✗ Virtual threads  — Java 17 project; would use in Java 21 upgrade
+
+SQL:
+  ✓ Window functions: ROW_NUMBER/RANK/DENSE_RANK, LAG/LEAD, running totals
+  ✓ CTEs (recursive for hierarchies, non-recursive for readability)
+  ✓ Composite/Partial/Covering indexes
+  ✓ EXPLAIN (ANALYZE, BUFFERS) — seq scan vs index scan
+  ✓ Isolation levels: READ COMMITTED (default), REPEATABLE READ for reports
+  ✓ FOR UPDATE / FOR UPDATE SKIP LOCKED (Outbox pattern)
+  ✓ @Version optimistic locking in Hibernate
+  ✓ N+1 prevention: JOIN FETCH, @EntityGraph, @BatchSize
+```
