@@ -30,7 +30,7 @@ export const sagaService = {
   /**
    * Get all sagas (paginated)
    */
-  async getAll(page: number = 0, size: number = 20): Promise<{ content: SagaInstance[] }> {
+  async getAll(_page: number = 0, _size: number = 20): Promise<{ content: SagaInstance[] }> {
     // Mock implementation - replace with actual API call when endpoint is available
     return { content: [] }
   }

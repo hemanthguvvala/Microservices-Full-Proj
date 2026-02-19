@@ -60,6 +60,7 @@ services:
       - '--storage.tsdb.path=/prometheus'
     networks:
       - monitoring
+      - microservices-net
 
   # Grafana
   grafana:
@@ -76,6 +77,7 @@ services:
       - grafana-data:/var/lib/grafana
     networks:
       - monitoring
+      - microservices-net
     depends_on:
       - prometheus
 
@@ -116,6 +118,10 @@ services:
 networks:
   monitoring:
     driver: bridge
+  # Connect to main docker-compose network for scraping service metrics
+  microservices-net:
+    external: true
+    name: learnfullproductproj_microservices-net
 
 volumes:
   elasticsearch-data:

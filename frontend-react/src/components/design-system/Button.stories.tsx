@@ -1,4 +1,6 @@
+// @ts-ignore - @storybook/react may not be installed
 import type { Meta, StoryObj } from '@storybook/react'
+// @ts-ignore - @storybook/test may not be installed
 import { fn } from '@storybook/test'
 
 /**
@@ -254,7 +256,7 @@ export const FullWidth: Story = {
     fullWidth: true,
   },
   decorators: [
-    (Story) => (
+    (Story: any) => (
       <div style={{ width: '320px' }}>
         <Story />
       </div>

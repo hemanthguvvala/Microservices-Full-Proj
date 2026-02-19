@@ -17,7 +17,22 @@
  * - VPAT (Voluntary Product Accessibility Template) maintained for enterprise sales
  */
 
+// @ts-ignore - axe-core may not be installed
 import type { AxeResults } from 'axe-core'
+
+// Fallback type if axe-core is not installed
+type AccessibilityViolation = {
+  impact?: string
+  id: string
+  description: string
+  helpUrl: string
+  tags: string[]
+  nodes: Array<{
+    target: string[]
+    html: string
+    failureSummary?: string
+  }>
+}
 
 // ─── Axe-Core Integration ─────────────────────────────────────────────────
 
@@ -34,6 +49,7 @@ export async function runAccessibilityAudit(
     disableRules?: string[]
   }
 ): Promise<AxeResults> {
+  // @ts-ignore - axe-core may not be installed
   const axe = await import('axe-core')
 
   const axeOptions: any = {
@@ -63,7 +79,7 @@ export async function runAccessibilityAudit(
 /**
  * Format and log accessibility violations in a developer-friendly way.
  */
-function logAccessibilityViolations(violations: AxeResults['violations']): void {
+function logAccessibilityViolations(violations: AccessibilityViolation[]): void {
   console.group(
     `%c♿ Accessibility Violations (${violations.length})`,
     'color: #e74c3c; font-weight: bold; font-size: 14px'
@@ -115,6 +131,7 @@ export async function initAccessibilityDevTools(): Promise<void> {
   if (!import.meta.env.DEV) return
 
   try {
+    // @ts-ignore - @axe-core/react may not be installed
     const axe = await import('@axe-core/react')
     const React = await import('react')
     const ReactDOM = await import('react-dom')

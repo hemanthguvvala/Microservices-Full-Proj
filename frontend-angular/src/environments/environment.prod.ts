@@ -1,0 +1,15 @@
+export const environment = {
+  production: true,
+  apiBaseUrl: '/api',
+  gatewayUrl: '',
+  employeeApiUrl: '/api/v1/employees',
+  payrollApiUrl: '/api/payrolls',
+  notificationApiUrl: '/api/v1/notifications',
+  authApiUrl: '/api/auth',
+  searchApiUrl: '/api/search',
+  sagaApiUrl: '/api/sagas',
+  metricsApiUrl: '/api/metrics',
+  filesApiUrl: '/api/v1/files',
+  graphqlUrl: '/graphql',
+  wsEndpoint: '/ws',
+};

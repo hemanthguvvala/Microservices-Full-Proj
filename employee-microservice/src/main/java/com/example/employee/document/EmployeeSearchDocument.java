@@ -9,6 +9,7 @@ import org.springframework.data.elasticsearch.annotations.Document;
 import org.springframework.data.elasticsearch.annotations.Field;
 import org.springframework.data.elasticsearch.annotations.FieldType;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 /**
@@ -47,7 +48,7 @@ public class EmployeeSearchDocument {
     private String position;
     
     @Field(type = FieldType.Double)
-    private Double salary;
+    private BigDecimal salary;
     
     @Field(type = FieldType.Date)
     private LocalDate hireDate;

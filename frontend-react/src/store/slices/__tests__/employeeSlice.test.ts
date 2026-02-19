@@ -1,14 +1,13 @@
 // Tests for Redux employee slice
 import employeeReducer, {
   fetchEmployees,
-  fetchEmployeeById,
   createEmployee,
   deleteEmployee,
   clearCurrentEmployee,
   clearError,
 } from '../employeeSlice'
 import { configureStore } from '@reduxjs/toolkit'
-import employeeService from '../../services/employeeService'
+import employeeService from '../../../services/employeeService'
 
 jest.mock('../../services/employeeService')
 

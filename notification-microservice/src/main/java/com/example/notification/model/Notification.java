@@ -2,6 +2,8 @@ package com.example.notification.model;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.SQLDelete;
+import org.hibernate.annotations.SQLRestriction;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
@@ -16,6 +18,8 @@ import java.time.LocalDateTime;
     @Index(name = "idx_created_date", columnList = "createdDate")
 })
 @EntityListeners(AuditingEntityListener.class)
+@SQLDelete(sql = "UPDATE notifications SET deleted = true, deleted_at = NOW() WHERE id = ? AND version = ?")
+@SQLRestriction("deleted = false")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -58,6 +62,14 @@ public class Notification {
 
     @LastModifiedDate
     private LocalDateTime lastModifiedDate;
+
+    // ── Soft Delete ──────────────────────────────────────────────────────────
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean deleted = false;
+
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
 
     @Version
     private Long version;

@@ -1,6 +1,6 @@
 // Unit tests for employeeService
-import employeeService from '../services/employeeService'
-import api from '../services/api'
+import employeeService from '../employeeService'
+import api from '../api'
 
 // Mock the api module
 jest.mock('../services/api')

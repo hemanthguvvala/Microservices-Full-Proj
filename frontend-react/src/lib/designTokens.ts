@@ -210,7 +210,9 @@ export const lightTheme = {
   'color-focus-ring': `${primitives.colors.blue[500]}40`, // 25% opacity
 } as const
 
-export const darkTheme: typeof lightTheme = {
+export type Theme = { [K in keyof typeof lightTheme]: string }
+
+export const darkTheme: Theme = {
   'color-bg-primary': primitives.colors.gray[900],
   'color-bg-secondary': primitives.colors.gray[800],
   'color-bg-tertiary': primitives.colors.gray[700],
@@ -242,7 +244,7 @@ export const darkTheme: typeof lightTheme = {
   'color-border-primary': primitives.colors.gray[700],
   'color-border-secondary': primitives.colors.gray[600],
   'color-border-focus': primitives.colors.blue[400],
-  'color-border-error': primitives.colors.red[400],
+  'color-border-error': primitives.colors.red[500],
 
   'color-focus-ring': `${primitives.colors.blue[400]}40`,
 }
@@ -256,7 +258,7 @@ export const darkTheme: typeof lightTheme = {
  * Result: --color-bg-primary: #ffffff;
  * Usage in CSS/Tailwind: bg-[var(--color-bg-primary)]
  */
-export function applyTheme(theme: typeof lightTheme): void {
+export function applyTheme(theme: Theme): void {
   const root = document.documentElement
 
   Object.entries(theme).forEach(([key, value]) => {

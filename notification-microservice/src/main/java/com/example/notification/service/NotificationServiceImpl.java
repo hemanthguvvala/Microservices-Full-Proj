@@ -5,6 +5,8 @@ import com.example.notification.dto.NotificationRequest;
 import com.example.notification.dto.NotificationResponse;
 import com.example.notification.event.NotificationCreatedEvent;
 import com.example.notification.exception.NotificationNotFoundException;
+import com.example.notification.kafka.KafkaProducerService;
+import com.example.notification.mapper.NotificationMapper;
 import com.example.notification.model.Notification;
 import com.example.notification.model.Notification.NotificationStatus;
 import com.example.notification.repository.NotificationRepository;
@@ -37,6 +39,8 @@ public class NotificationServiceImpl implements NotificationService {
 
     private final NotificationRepository repository;
     private final ApplicationEventPublisher eventPublisher;
+    private final KafkaProducerService kafkaProducerService;
+    private final NotificationMapper notificationMapper;
 
     /**
      * Create + publish Spring ApplicationEvent.
@@ -46,16 +50,8 @@ public class NotificationServiceImpl implements NotificationService {
     @Transactional
     @CacheEvict(value = "notifications", allEntries = true)
     public NotificationResponse create(NotificationRequest request) {
-        Notification notification = Notification.builder()
-                .recipientId(request.recipientId())
-                .title(request.title())
-                .message(request.message())
-                .channelType(request.channelType())
-                .priority(request.priority())
-                .templateName(request.templateName())
-                .status(NotificationStatus.PENDING)
-                .retryCount(0)
-                .build();
+        // MapStruct compile-time mapping (replaces manual builder calls)
+        Notification notification = notificationMapper.toEntity(request);
 
         Notification saved = repository.save(notification);
         log.info("Notification created [id={}, channel={}]", saved.getId(), saved.getChannelType());
@@ -63,15 +59,18 @@ public class NotificationServiceImpl implements NotificationService {
         // Publish Spring ApplicationEvent — listener fires AFTER_COMMIT
         eventPublisher.publishEvent(new NotificationCreatedEvent(this, saved));
 
-        return NotificationResponse.from(saved);
+        // Publish Kafka event — other services can track notification lifecycle
+        kafkaProducerService.publishNotificationEvent(saved, "CREATED");
+
+        return notificationMapper.toResponse(saved);
     }
 
     /**
-     * @Cacheable — caches the result in Redis with key "notifications::id".
+     * Get notification by ID — cached with @Cacheable.
      * Subsequent calls with the same ID hit the cache, not the DB.
      *
      * Interview: "How does @Cacheable work?"
-     *   → "Spring intercepts the method call via AOP proxy. It checks the
+     *   - "Spring intercepts the method call via AOP proxy. It checks the
      *      cache for the key. If found (cache hit), returns cached value
      *      without executing the method. If not found (cache miss),
      *      executes the method and stores the result in the cache."
@@ -80,7 +79,7 @@ public class NotificationServiceImpl implements NotificationService {
     @Cacheable(value = "notifications", key = "#id")
     public NotificationResponse getById(Long id) {
         return repository.findById(id)
-                .map(NotificationResponse::from)
+                .map(notificationMapper::toResponse)
                 .orElseThrow(() -> new NotificationNotFoundException(id));
     }
 
@@ -92,14 +91,14 @@ public class NotificationServiceImpl implements NotificationService {
     public Page<NotificationResponse> search(NotificationFilter filter, Pageable pageable) {
         return repository
                 .findAll(NotificationSpecification.buildFrom(filter), pageable)
-                .map(NotificationResponse::from);
+                .map(notificationMapper::toResponse);
     }
 
     @Override
     @Cacheable(value = "user-notifications", key = "#recipientId + '-' + #pageable.pageNumber")
     public Page<NotificationResponse> getByRecipient(String recipientId, Pageable pageable) {
         return repository.findByRecipientId(recipientId, pageable)
-                .map(NotificationResponse::from);
+                .map(notificationMapper::toResponse);
     }
 
     @Override
@@ -113,7 +112,7 @@ public class NotificationServiceImpl implements NotificationService {
         notification.setReadAt(LocalDateTime.now());
         Notification saved = repository.save(notification);
 
-        return NotificationResponse.from(saved);
+        return notificationMapper.toResponse(saved);
     }
 
     @Override

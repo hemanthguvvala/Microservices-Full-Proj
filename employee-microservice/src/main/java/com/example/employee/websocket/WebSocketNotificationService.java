@@ -21,7 +21,7 @@ public class WebSocketNotificationService {
      */
     public void notifyEmployeeChange(EmployeeEvent event) {
         log.debug("Broadcasting employee event: {} for employee {}", 
-                  event.getEventType(), event.getEmployeeId());
+                  event.getEventType(), event.getEmployee().getId());
         messagingTemplate.convertAndSend("/topic/employees", event);
     }
 

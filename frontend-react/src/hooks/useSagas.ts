@@ -1,7 +1,7 @@
 // React Query hooks for saga management
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import sagaService from '../services/sagaService'
-import type { SagaInstance, EmployeeCreateRequest } from '../types'
+import type { EmployeeCreateRequest } from '../types'
 
 // Query keys
 export const sagaKeys = {
@@ -15,8 +15,9 @@ export function useSagaStatus(sagaId: string | null) {
     queryKey: sagaKeys.detail(sagaId || ''),
     queryFn: () => sagaService.getStatus(sagaId!),
     enabled: !!sagaId,
-    refetchInterval: (data) => {
+    refetchInterval: (query) => {
       // Auto-refetch every 2 seconds if saga is in progress
+      const data = query.state.data as any
       if (data?.status === 'IN_PROGRESS' || data?.status === 'STARTED') {
         return 2000
       }

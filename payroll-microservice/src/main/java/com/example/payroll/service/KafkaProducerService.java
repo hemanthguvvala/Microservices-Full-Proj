@@ -8,7 +8,17 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.concurrent.TimeUnit;
 
+/**
+ * Kafka Producer — publishes payroll lifecycle events.
+ *
+ * Interview: "Why not fire-and-forget for Kafka sends?"
+ * → "If the broker is down or the topic doesn't exist, fire-and-forget
+ *    silently swallows the exception. The event is lost forever.
+ *    Blocking .get() with a timeout ensures we KNOW if the send failed,
+ *    and the caller can handle the error (retry, compensate, alert)."
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -16,6 +26,7 @@ public class KafkaProducerService {
 
     private final KafkaTemplate<String, PayrollEvent> kafkaTemplate;
     private static final String PAYROLL_TOPIC = "payroll-events";
+    private static final long SEND_TIMEOUT_SECONDS = 10;
 
     public void sendPayrollCreatedEvent(Payroll payroll) {
         PayrollEvent event = buildPayrollEvent(payroll, "CREATED");
@@ -57,10 +68,13 @@ public class KafkaProducerService {
 
     private void sendEvent(PayrollEvent event) {
         try {
-            kafkaTemplate.send(PAYROLL_TOPIC, event.getPayrollId().toString(), event);
+            kafkaTemplate.send(PAYROLL_TOPIC, event.getPayrollId().toString(), event)
+                    .get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             log.info("Sent payroll event: {} for payroll ID: {}", event.getEventType(), event.getPayrollId());
         } catch (Exception e) {
             log.error("Failed to send payroll event: {}", e.getMessage(), e);
+            // Re-throw so the caller knows the event wasn't delivered
+            throw new RuntimeException("Kafka publish failed for payroll event " + event.getEventType(), e);
         }
     }
 }

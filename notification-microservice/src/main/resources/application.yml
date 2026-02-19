@@ -5,6 +5,15 @@ spring:
   application:
     name: notification-service
 
+  # ── Config Server ──────────────────────────────────────────────────────────────
+  config:
+    import: optional:configserver:http://localhost:8888
+  cloud:
+    config:
+      username: config-admin
+      password: config-secret
+      fail-fast: false
+
   # ── JPA / Datasource ──────────────────────────────────────────────────────────
   datasource:
     url: jdbc:h2:mem:notificationdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
@@ -96,6 +105,12 @@ management:
         enabled: true
     tags:
       application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: 1.0
+  zipkin:
+    tracing:
+      endpoint: http://localhost:9411/api/v2/spans
 
 # ── App-specific config ──────────────────────────────────────────────────────────
 app:

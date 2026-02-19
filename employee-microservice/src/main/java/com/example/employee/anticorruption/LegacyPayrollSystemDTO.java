@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
+
 /**
  * Anti-Corruption Layer (ACL) Pattern
  * 
@@ -28,7 +30,7 @@ public class LegacyPayrollSystemDTO {
     private String emailAddr;          // Instead of email
     private String dept;               // Instead of department
     private String pos;                // Instead of position
-    private Double monthlySal;         // Instead of salary
+    private BigDecimal monthlySal;     // Instead of salary
     private String stat;               // Instead of status
     private String hiredDate;          // Instead of hireDate (String format)
     

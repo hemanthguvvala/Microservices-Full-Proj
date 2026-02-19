@@ -15,13 +15,12 @@
 
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Download, Upload, Search, Plus, AlertCircle } from 'lucide-react'
+import { Download, Upload, Search, AlertCircle } from 'lucide-react'
 
 // Production hooks
 import { 
   useDebounce, 
   useOnlineStatus,
-  useIntersectionObserver 
 } from '../hooks/useProduction'
 
 // Components
@@ -66,7 +65,7 @@ const EmployeeListProduction: React.FC = () => {
       track('search', {
         query: debouncedSearch,
         resultsCount: items.length,
-        filters: { status: filter },
+        filters: { status: filter } as any,
       })
     }
   }, [debouncedSearch, filter, track])
@@ -81,13 +80,12 @@ const EmployeeListProduction: React.FC = () => {
     reset,
   } = useInfiniteScrollData<Employee>({
     fetchItems: async (page, pageSize) => {
-      const response = await employeeService.list({
-        page,
-        size: pageSize,
-        search: debouncedSearch,
-        status: filter === 'all' ? undefined : filter,
-      })
-      return response.data.content
+      if (debouncedSearch) {
+        const response = await employeeService.search(debouncedSearch, page, pageSize)
+        return response.content
+      }
+      const response = await employeeService.getAll(page, pageSize)
+      return response.content
     },
     pageSize: 20,
   })
@@ -159,12 +157,12 @@ const EmployeeListProduction: React.FC = () => {
   }
 
   // Delete handler
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: number) => {
     if (!confirm(t('deleteConfirm'))) return
 
     try {
       await employeeService.delete(id)
-      track('employee_delete', { employeeId: id })
+      track('employee_delete', { employeeId: String(id) })
       reset()
     } catch (error) {
       track('error_occurred', {
@@ -303,7 +301,7 @@ const EmployeeListProduction: React.FC = () => {
                 <div className="flex gap-2">
                   <button
                     onClick={() => {
-                      track('employee_view', { employeeId: employee.id! })
+                      track('employee_view', { employeeId: String(employee.id) })
                       // Navigate to detail
                     }}
                     className="px-3 py-1 text-sm text-primary-600 hover:bg-primary-50 rounded"
@@ -311,7 +309,7 @@ const EmployeeListProduction: React.FC = () => {
                     {t('view')}
                   </button>
                   <button
-                    onClick={() => handleDelete(employee.id!)}
+                    onClick={() => handleDelete(employee.id)}
                     className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded"
                   >
                     {t('delete')}

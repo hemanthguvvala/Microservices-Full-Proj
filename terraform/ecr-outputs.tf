@@ -7,7 +7,10 @@ resource "aws_ecr_repository" "services" {
     "employee-service",
     "payroll-service",
     "api-gateway",
-    "frontend"
+    "frontend",
+    "notification-service",
+    "eureka-server",
+    "config-server"
   ])
 
   name                 = "${var.project_name}/${each.key}"

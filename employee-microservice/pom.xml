@@ -159,6 +159,13 @@
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
 
+        <!-- Logstash Logback Encoder — ships structured JSON logs to ELK -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>7.4</version>
+        </dependency>
+
         <!-- Micrometer Tracing -->
         <dependency>
             <groupId>io.micrometer</groupId>

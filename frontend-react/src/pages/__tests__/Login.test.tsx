@@ -16,7 +16,7 @@ const mockAuthContext = {
   user: null,
   login: mockLogin,
   logout: jest.fn(),
-}
+} as any
 
 describe('Login Component', () => {
   beforeEach(() => {

@@ -18,11 +18,12 @@ services:
       POSTGRES_DB: employeedb
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: admin123
-      POSTGRES_MULTIPLE_DATABASES: employeedb,payrolldb
+      POSTGRES_MULTIPLE_DATABASES: employeedb,payrolldb,notificationdb
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./infrastructure/docker/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U admin"]
       interval: 10s
@@ -165,6 +166,36 @@ services:
     networks:
       - microservices-net
 
+  # Logstash — Log aggregation (ships to Elasticsearch)
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: logstash
+    ports:
+      - "5000:5000"
+      - "9600:9600"
+    environment:
+      - "LS_JAVA_OPTS=-Xms256m -Xmx256m"
+    volumes:
+      - ./monitoring/logstash/pipeline:/usr/share/logstash/pipeline
+      - ./monitoring/logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml
+    depends_on:
+      - elasticsearch
+    networks:
+      - microservices-net
+
+  # Kibana — Log visualization
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - microservices-net
+
   # ── Spring Cloud Infrastructure ────────────────────────────────────────────────
 
   # Eureka Discovery Server
@@ -196,6 +227,8 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: docker
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    volumes:
+      - ./config-repository:/app/config-repository
     depends_on:
       eureka-server:
         condition: service_healthy
@@ -219,16 +252,19 @@ services:
       - "8081:8081"
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      DB_URL: jdbc:postgresql://postgresql:5432/employeedb
-      DB_USERNAME: admin
-      DB_PASSWORD: admin123
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      EUREKA_URL: http://eureka-server:8761/eureka/
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgresql:5432/employeedb
+      SPRING_DATASOURCE_USERNAME: admin
+      SPRING_DATASOURCE_PASSWORD: admin123
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE: http://eureka-server:8761/eureka/
       SPRING_DATA_MONGODB_URI: mongodb://admin:admin123@mongodb:27017/employeedb?authSource=admin
       SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      LOGSTASH_HOST: logstash
+      LOGSTASH_PORT: 5000
+      SPRING_CONFIG_IMPORT: optional:configserver:http://config-server:8888
     depends_on:
       postgresql:
         condition: service_healthy
@@ -258,11 +294,15 @@ services:
       - "8083:8083"
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      DB_URL: jdbc:postgresql://postgresql:5432/payrolldb
-      DB_USERNAME: admin
-      DB_PASSWORD: admin123
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      EUREKA_URL: http://eureka-server:8761/eureka/
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgresql:5432/payrolldb
+      SPRING_DATASOURCE_USERNAME: admin
+      SPRING_DATASOURCE_PASSWORD: admin123
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      LOGSTASH_HOST: logstash
+      LOGSTASH_PORT: 5000
+      SPRING_CONFIG_IMPORT: optional:configserver:http://config-server:8888
     depends_on:
       postgresql:
         condition: service_healthy
@@ -294,8 +334,12 @@ services:
       DB_PASSWORD: admin123
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       EUREKA_URI: http://eureka-server:8761/eureka
+      ZIPKIN_HOST: zipkin
+      LOGSTASH_HOST: logstash
+      LOGSTASH_PORT: 5000
+      SPRING_CONFIG_IMPORT: optional:configserver:http://config-server:8888
     depends_on:
       postgresql:
         condition: service_healthy
@@ -324,7 +368,12 @@ services:
       - "8080:8080"
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      EUREKA_URL: http://eureka-server:8761/eureka/
+      EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      SPRING_DATA_REDIS_HOST: redis
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      LOGSTASH_HOST: logstash
+      LOGSTASH_PORT: 5000
+      SPRING_CONFIG_IMPORT: optional:configserver:http://config-server:8888
     depends_on:
       eureka-server:
         condition: service_healthy
@@ -341,11 +390,25 @@ services:
 
   frontend:
     build:
-      context: ./frontend
+      context: ./frontend-react
       dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://api-gateway:8080
     container_name: frontend
     ports:
       - "3000:80"
+    depends_on:
+      - api-gateway
+    networks:
+      - microservices-net
+
+  frontend-angular:
+    build:
+      context: ./frontend-angular
+      dockerfile: Dockerfile
+    container_name: frontend-angular
+    ports:
+      - "4201:80"
     depends_on:
       - api-gateway
     networks:

@@ -1,3 +1,4 @@
+import React from 'react'
 import config from '../config'
 import { trackMessage } from '../config/sentry'
 
@@ -48,7 +49,7 @@ export type AnalyticsEvent = {
  * Analytics properties
  */
 interface AnalyticsProperties {
-  [key: string]: string | number | boolean | undefined
+  [key: string]: string | number | boolean | Record<string, any> | undefined
 }
 
 /**
@@ -68,7 +69,6 @@ interface UserProperties {
  */
 class Analytics {
   private initialized = false
-  private userId: string | null = null
 
   /**
    * Initialize analytics
@@ -77,12 +77,12 @@ class Analytics {
     if (this.initialized) return
 
     // Initialize Google Analytics
-    if (config.get().googleAnalyticsId) {
+    if (config.get().analytics.googleAnalyticsId) {
       this.initGoogleAnalytics()
     }
 
     // Initialize Mixpanel
-    if (config.get().mixpanelToken) {
+    if (config.get().analytics.mixpanelToken) {
       this.initMixpanel()
     }
 
@@ -94,7 +94,7 @@ class Analytics {
    * Initialize Google Analytics (gtag.js)
    */
   private initGoogleAnalytics() {
-    const gaId = config.get().googleAnalyticsId
+    const gaId = config.get().analytics.googleAnalyticsId
     if (!gaId) return
 
     // Load gtag.js script
@@ -120,7 +120,7 @@ class Analytics {
    * Initialize Mixpanel
    */
   private initMixpanel() {
-    const token = config.get().mixpanelToken
+    const token = config.get().analytics.mixpanelToken
     if (!token || typeof window === 'undefined') return
 
     // Load Mixpanel SDK
@@ -180,7 +180,7 @@ class Analytics {
 
     // Google Analytics page view
     if (window.gtag) {
-      window.gtag('config', config.get().googleAnalyticsId!, {
+      window.gtag('config', config.get().analytics.googleAnalyticsId!, {
         page_path: path,
         page_title: title,
       })
@@ -191,7 +191,6 @@ class Analytics {
    * Set user properties
    */
   identify(userId: string, properties?: UserProperties) {
-    this.userId = userId
 
     // Google Analytics
     if (window.gtag) {
@@ -216,7 +215,6 @@ class Analytics {
    * Reset user (on logout)
    */
   reset() {
-    this.userId = null
 
     // Mixpanel
     if (window.mixpanel) {
@@ -334,7 +332,7 @@ export const useComponentTracking = (componentName: string) => {
 declare global {
   interface Window {
     dataLayer: any[]
-    gtag: (...args: any[]) => void
+    gtag?: (...args: any[]) => void
     mixpanel: any
   }
 }

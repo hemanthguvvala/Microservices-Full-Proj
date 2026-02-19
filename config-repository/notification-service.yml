@@ -1,0 +1,29 @@
+# ── Notification Service — Config Server Overrides ────────────────────────────
+server:
+  port: 8084
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/notificationdb
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate
+
+  cache:
+    type: redis
+    redis:
+      time-to-live: 300000
+
+  kafka:
+    bootstrap-servers: localhost:9092
+
+# App-specific
+app:
+  notifications:
+    retention-days: 90
+    max-batch-size: 500

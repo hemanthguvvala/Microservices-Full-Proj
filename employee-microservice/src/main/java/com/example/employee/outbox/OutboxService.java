@@ -37,6 +37,7 @@ public class OutboxService {
                     .aggregateType(aggregateType)
                     .aggregateId(aggregateId)
                     .eventType(eventType)
+                    .topic(aggregateType.toLowerCase() + "-events")
                     .payload(payloadJson)
                     .createdAt(LocalDateTime.now())
                     .status(OutboxEvent.OutboxStatus.PENDING)

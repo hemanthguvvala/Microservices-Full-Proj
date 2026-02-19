@@ -8,6 +8,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 @Data
@@ -33,7 +34,7 @@ public class EmployeeCreateDTO {
 
     @NotNull(message = "Salary is required")
     @Positive(message = "Salary must be positive")
-    private Double salary;
+    private BigDecimal salary;
 
     private LocalDate hireDate;
 

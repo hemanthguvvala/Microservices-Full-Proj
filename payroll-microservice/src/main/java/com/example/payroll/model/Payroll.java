@@ -3,6 +3,8 @@ package com.example.payroll.model;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.*;
 import lombok.*;
+import org.hibernate.annotations.SQLDelete;
+import org.hibernate.annotations.SQLRestriction;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
@@ -14,15 +16,17 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "payrolls", indexes = {
-    @Index(name = "idx_employee_id", columnList = "employee_id"),
-    @Index(name = "idx_pay_period_start", columnList = "pay_period_start"),
-    @Index(name = "idx_status", columnList = "status")
+        @Index(name = "idx_employee_id", columnList = "employee_id"),
+        @Index(name = "idx_pay_period_start", columnList = "pay_period_start"),
+        @Index(name = "idx_status", columnList = "status")
 })
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
 @EntityListeners(AuditingEntityListener.class)
+@SQLDelete(sql = "UPDATE payrolls SET deleted = true, deleted_at = NOW() WHERE id = ?")
+@SQLRestriction("deleted = false")
 public class Payroll implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -99,6 +103,14 @@ public class Payroll implements Serializable {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
+    // Soft delete fields
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean deleted = false;
+
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
     @Version
     @Column(name = "version")
     private Long version;
@@ -107,10 +119,10 @@ public class Payroll implements Serializable {
     @PreUpdate
     public void calculateNetSalary() {
         this.netSalary = basicSalary
-            .add(allowances)
-            .add(bonuses)
-            .subtract(deductions)
-            .subtract(tax);
+                .add(allowances)
+                .add(bonuses)
+                .subtract(deductions)
+                .subtract(tax);
     }
 
     public enum PayrollStatus {

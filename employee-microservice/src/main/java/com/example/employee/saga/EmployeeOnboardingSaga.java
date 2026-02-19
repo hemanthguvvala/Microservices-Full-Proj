@@ -155,7 +155,7 @@ public class EmployeeOnboardingSaga implements SagaOrchestrator {
                     
                 case "SEND_WELCOME_EMAIL":
                     log.info("Compensating: Sending cancellation email");
-                    if (mailSender != null && data.getEmailSent()) {
+                    if (mailSender != null && data.isEmailSent()) {
                         try {
                             SimpleMailMessage message = new SimpleMailMessage();
                             message.setTo(data.getEmail());

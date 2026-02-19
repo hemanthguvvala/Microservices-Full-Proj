@@ -53,6 +53,45 @@ apiGateway:
 frontend:
   replicaCount: 3
 
+notificationService:
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  autoscaling:
+    minReplicas: 3
+    maxReplicas: 15
+  env:
+    SPRING_PROFILES_ACTIVE: prod
+
+eurekaServer:
+  replicaCount: 2    # HA in production
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  env:
+    SPRING_PROFILES_ACTIVE: prod
+
+configServer:
+  replicaCount: 2    # HA in production
+  resources:
+    requests:
+      cpu: 300m
+      memory: 384Mi
+    limits:
+      cpu: 700m
+      memory: 768Mi
+  env:
+    SPRING_PROFILES_ACTIVE: prod
+
 # In production: use managed services instead of K8s-hosted databases
 postgresql:
   enabled: false    # Use AWS RDS instead

@@ -1,0 +1,140 @@
+{{/*
+Payroll Service — Deployment + Service + HPA + ServiceAccount
+Interview insight: Same template pattern as employee-service,
+demonstrating Helm's DRY principle with parameterized values.
+*/}}
+{{- if .Values.payrollService.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payroll-service
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "employee-platform.labels" . | nindent 4 }}
+    app: payroll-service
+spec:
+  replicas: {{ .Values.payrollService.replicaCount }}
+  selector:
+    matchLabels:
+      app: payroll-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: payroll-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.payrollService.service.port }}"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      serviceAccountName: payroll-service-sa
+      terminationGracePeriodSeconds: 60
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - payroll-service
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: payroll-service
+          image: {{ include "employee-platform.image" (dict "global" .Values.global "image" .Values.payrollService.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.payrollService.service.port }}
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: db-credentials
+          env:
+            {{- range $key, $value := .Values.payrollService.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            {{- toYaml .Values.payrollService.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 10"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payroll-service
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: payroll-service
+spec:
+  type: {{ .Values.payrollService.service.type }}
+  selector:
+    app: payroll-service
+  ports:
+    - name: http
+      port: {{ .Values.payrollService.service.port }}
+      targetPort: http
+---
+{{- if .Values.payrollService.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: payroll-service-hpa
+  namespace: {{ .Values.global.namespace }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: payroll-service
+  minReplicas: {{ .Values.payrollService.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.payrollService.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.payrollService.autoscaling.targetCPUUtilization }}
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: payroll-service-sa
+  namespace: {{ .Values.global.namespace }}
+{{- end }}

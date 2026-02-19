@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 @Data
@@ -12,7 +13,7 @@ import java.time.LocalDate;
 public class PayrollCreateRequest {
     private Long employeeId;
     private String employeeName;
-    private Double salary;
+    private BigDecimal salary;
     private String department;
     private LocalDate effectiveDate;
 }

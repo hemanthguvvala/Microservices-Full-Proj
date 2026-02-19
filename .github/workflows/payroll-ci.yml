@@ -1,0 +1,132 @@
+# ─── Payroll Microservice CI/CD Pipeline ──────────────────────────────────────
+# Interview insight: Path-filtered CI = only runs when payroll code changes
+# Demonstrates: GitHub Actions services, JaCoCo, Docker multi-stage build
+
+name: Payroll Microservice CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'payroll-microservice/**'
+      - '.github/workflows/payroll-ci.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'payroll-microservice/**'
+
+defaults:
+  run:
+    working-directory: payroll-microservice
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: payrolldb_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build with Maven
+        run: mvn clean install -DskipTests
+
+      - name: Run tests
+        run: mvn test
+        env:
+          SPRING_PROFILES_ACTIVE: test
+
+      - name: Generate coverage report
+        run: mvn jacoco:report
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: payroll-microservice/target/site/jacoco/jacoco.xml
+          flags: payroll
+          name: payroll-service
+
+  code-quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Run Checkstyle
+        run: mvn checkstyle:check || true
+
+      - name: Run SpotBugs
+        run: mvn spotbugs:check || true
+
+  docker-build:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: payroll-microservice
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/payroll-service:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/payroll-service:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -99,7 +99,7 @@ export function InfiniteScroll<T>({
   const isLoadingRef = useRef(false)
 
   // Intersection observer to detect when to load more
-  const { entry, setNode } = useIntersectionObserver({
+  const [setNode, entry] = useIntersectionObserver({
     threshold,
     rootMargin,
   })
@@ -240,7 +240,6 @@ export function VirtualInfiniteScroll<T>({
     ({ scrollOffset, scrollUpdateWasRequested }: any) => {
       if (scrollUpdateWasRequested || !listRef.current) return
 
-      const list = listRef.current
       const totalHeight = items.length * itemHeight
       const visibleHeight = height
       

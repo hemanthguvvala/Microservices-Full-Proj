@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 @Data
@@ -16,7 +17,7 @@ public class EmployeeDTO {
     private String email;
     private String department;
     private String position;
-    private Double salary;
+    private BigDecimal salary;
     private LocalDate hireDate;
     private String phoneNumber;
     private String fullName;

@@ -188,3 +188,18 @@ resource "aws_cloudwatch_log_group" "api_gateway" {
   name              = "/aws/eks/${var.project_name}/api-gateway"
   retention_in_days = 30
 }
+
+resource "aws_cloudwatch_log_group" "notification_service" {
+  name              = "/aws/eks/${var.project_name}/notification-service"
+  retention_in_days = 30
+}
+
+resource "aws_cloudwatch_log_group" "eureka_server" {
+  name              = "/aws/eks/${var.project_name}/eureka-server"
+  retention_in_days = 30
+}
+
+resource "aws_cloudwatch_log_group" "config_server" {
+  name              = "/aws/eks/${var.project_name}/config-server"
+  retention_in_days = 30
+}

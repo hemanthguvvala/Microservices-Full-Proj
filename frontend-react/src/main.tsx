@@ -15,10 +15,10 @@ import ErrorBoundary from './components/ErrorBoundary'
 
 // App imports
 import App from './App'
-import { store } from './store/store'
+import { store } from './store'
 import { queryClient } from './config/queryClient'
-import { AuthProvider } from './contexts/AuthContext'
-import { NotificationProvider } from './contexts/NotificationContext'
+import { AuthProvider } from './context/AuthContext'
+import { NotificationProvider } from './context/NotificationContext'
 
 // Styles
 import './index.css'

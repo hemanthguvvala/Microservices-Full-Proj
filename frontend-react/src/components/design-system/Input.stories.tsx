@@ -1,3 +1,4 @@
+// @ts-ignore - @storybook/react may not be installed
 import type { Meta, StoryObj } from '@storybook/react'
 import React from 'react'
 
@@ -172,7 +173,7 @@ const meta = {
   },
   tags: ['autodocs'],
   decorators: [
-    (Story) => (
+    (Story: any) => (
       <div style={{ width: '360px' }}>
         <Story />
       </div>

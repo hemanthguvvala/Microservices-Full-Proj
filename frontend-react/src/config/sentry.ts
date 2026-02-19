@@ -1,6 +1,5 @@
 // Sentry configuration for production error tracking
 import * as Sentry from '@sentry/react'
-import { BrowserTracing } from '@sentry/tracing'
 
 export function initSentry() {
   // Only initialize in production
@@ -8,11 +7,14 @@ export function initSentry() {
     Sentry.init({
       dsn: import.meta.env.VITE_SENTRY_DSN,
       
-      // Performance Monitoring
+      // Performance Monitoring & Replay integrations
       integrations: [
-        new BrowserTracing({
+        Sentry.browserTracingIntegration({
           // Set tracing origins to match your backend
-          tracePropagationTargets: ['localhost', /^https:\/\/yourapi\.com/],
+        }),
+        Sentry.replayIntegration({
+          maskAllText: true,
+          blockAllMedia: true,
         }),
       ],
 
@@ -50,23 +52,14 @@ export function initSentry() {
 
         // Filter out non-error events
         if (event.exception) {
-          const error = hint.originalException
+          const _error = hint.originalException
           
           // Log to console in development
-          console.error('Sentry Event:', event, error)
+          console.error('Sentry Event:', event, _error)
         }
 
         return event
       },
-
-      // Automatically capture console errors
-      integrations: [
-        ...Sentry.defaultIntegrations,
-        new Sentry.Replay({
-          maskAllText: true,
-          blockAllMedia: true,
-        }),
-      ],
 
       // Session Replay for debugging
       replaysSessionSampleRate: 0.1, // 10% of sessions

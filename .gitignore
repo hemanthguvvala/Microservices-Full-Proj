@@ -1,0 +1,80 @@
+# ════════════════════════════════════════════════════
+#  LearnFullProductProj — .gitignore
+# ════════════════════════════════════════════════════
+
+# ── Java / Maven ──
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.log
+hs_err_pid*
+replay_pid*
+
+# ── Node.js ──
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+dist/
+build/
+.cache/
+
+# ── IDE / Editors ──
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+.factorypath
+
+# ── OS Files ──
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+._*
+
+# ── Environment / Secrets ──
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.crt
+
+# ── Docker ──
+docker-compose.override.yml
+
+# ── Terraform ──
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+.terraform.lock.hcl
+
+# ── Monitoring / Logs ──
+*.log
+logs/
+
+# ── Test / Coverage ──
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+surefire-reports/
+
+# ── Misc ──
+*.bak
+*.tmp
+*.orig
+.gradle/

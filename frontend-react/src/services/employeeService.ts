@@ -12,7 +12,7 @@ export const employeeService = {
    * Get all employees with pagination
    */
   async getAll(page: number = 0, size: number = 10): Promise<PaginatedResponse<Employee>> {
-    const response = await api.get<PaginatedResponse<Employee>>('/api/employees', {
+    const response = await api.get<PaginatedResponse<Employee>>('/api/v1/employees', {
       params: { page, size }
     })
     return response.data
@@ -22,7 +22,7 @@ export const employeeService = {
    * Get employee by ID
    */
   async getById(id: number): Promise<Employee> {
-    const response = await api.get<Employee>(`/api/employees/${id}`)
+    const response = await api.get<Employee>(`/api/v1/employees/${id}`)
     return response.data
   },
 
@@ -30,7 +30,7 @@ export const employeeService = {
    * Create new employee
    */
   async create(employeeData: EmployeeCreateRequest): Promise<Employee> {
-    const response = await api.post<Employee>('/api/employees', employeeData)
+    const response = await api.post<Employee>('/api/v1/employees', employeeData)
     return response.data
   },
 
@@ -38,7 +38,7 @@ export const employeeService = {
    * Update existing employee
    */
   async update(id: number, employeeData: Partial<EmployeeCreateRequest>): Promise<Employee> {
-    const response = await api.put<Employee>(`/api/employees/${id}`, employeeData)
+    const response = await api.put<Employee>(`/api/v1/employees/${id}`, employeeData)
     return response.data
   },
 
@@ -46,14 +46,14 @@ export const employeeService = {
    * Delete employee
    */
   async delete(id: number): Promise<void> {
-    await api.delete(`/api/employees/${id}`)
+    await api.delete(`/api/v1/employees/${id}`)
   },
 
   /**
    * Search employees using Elasticsearch
    */
   async search(query: string, page: number = 0, size: number = 20): Promise<PaginatedResponse<Employee>> {
-    const response = await api.get<PaginatedResponse<Employee>>('/api/employees/search', {
+    const response = await api.get<PaginatedResponse<Employee>>('/api/v1/employees/search', {
       params: { q: query, page, size }
     })
     return response.data
@@ -63,7 +63,7 @@ export const employeeService = {
    * Get employee statistics
    */
   async getStats(): Promise<EmployeeStats> {
-    const response = await api.get<EmployeeStats>('/api/employees/stats')
+    const response = await api.get<EmployeeStats>('/api/v1/employees/stats')
     return response.data
   }
 }

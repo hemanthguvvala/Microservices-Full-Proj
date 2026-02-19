@@ -25,6 +25,10 @@ resources:
   - services/payroll-service.yaml
   - services/api-gateway.yaml
   - services/frontend.yaml
+  - services/frontend-angular.yaml
+  - services/eureka-server.yaml
+  - services/config-server.yaml
+  - services/notification-service.yaml
 
   # Infrastructure
   - infrastructure/postgresql.yaml

@@ -41,7 +41,7 @@ class PerformanceMonitor {
       }
 
       // Send to Sentry as measurement
-      Sentry.setMeasurement(metric.name, metric.value, metric.unit)
+      Sentry.setMeasurement(metric.name, metric.value, metric.name === 'CLS' ? '' : 'millisecond')
 
       // Custom analytics endpoint
       this.sendToAnalytics(metric)
@@ -135,13 +135,6 @@ class PerformanceMonitor {
 const performanceMonitor = new PerformanceMonitor()
 
 export default performanceMonitor
-
-// Type declaration for gtag
-declare global {
-  interface Window {
-    gtag?: (...args: any[]) => void
-  }
-}
 
 // Custom hook to access metrics
 export function usePerformanceMetrics() {

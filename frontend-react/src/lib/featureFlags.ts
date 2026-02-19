@@ -19,7 +19,7 @@
  * This implementation mirrors the LaunchDarkly SDK API pattern.
  */
 
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { logger } from './logger'
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -62,7 +62,6 @@ class FeatureFlagClient {
   private sdkKey: string
   private listeners: Set<() => void> = new Set()
   private pollingTimer: ReturnType<typeof setInterval> | null = null
-  private initialized = false
 
   constructor(config: {
     apiEndpoint?: string
@@ -79,7 +78,6 @@ class FeatureFlagClient {
 
     try {
       await this.fetchFlags()
-      this.initialized = true
       logger.info('Feature flags initialized', {
         flagCount: Object.keys(this.flags).length,
       })
@@ -87,7 +85,6 @@ class FeatureFlagClient {
       logger.warn('Failed to fetch feature flags, using defaults', { error })
       // Use defaults on failure — this is intentional resilience
       this.initializeFromDefaults()
-      this.initialized = true
     }
   }
 

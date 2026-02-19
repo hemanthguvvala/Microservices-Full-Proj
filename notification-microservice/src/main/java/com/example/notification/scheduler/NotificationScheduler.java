@@ -56,7 +56,7 @@ public class NotificationScheduler {
         LocalDateTime cutoff = LocalDateTime.now().minusDays(90);
 
         var staleNotifications = notificationRepository.findStaleNotifications(
-                List.of(NotificationStatus.READ, NotificationStatus.DISMISSED), cutoff);
+                List.of(NotificationStatus.READ, NotificationStatus.CANCELLED), cutoff);
 
         if (!staleNotifications.isEmpty()) {
             notificationRepository.deleteAll(staleNotifications);

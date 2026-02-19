@@ -5,6 +5,8 @@ import com.example.employee.exception.DuplicateResourceException;
 import com.example.employee.exception.ResourceNotFoundException;
 import com.example.employee.metrics.MetricsService;
 import com.example.employee.model.Employee;
+import com.example.employee.outbox.OutboxEvent;
+import com.example.employee.outbox.OutboxEventRepository;
 import com.example.employee.repository.EmployeeRepository;
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
@@ -31,12 +33,15 @@ public class EmployeeService {
 
     @Autowired
     private EmployeeRepository employeeRepository;
-    
+
     @Autowired
     private KafkaProducerService kafkaProducerService;
-    
+
     @Autowired
     private MetricsService metricsService;
+
+    @Autowired
+    private OutboxEventRepository outboxRepository;
 
     @Transactional(readOnly = true)
     @Cacheable(value = "employees", key = "#pageable.pageNumber + '-' + #pageable.pageSize + '-' + #pageable.sort.toString()")
@@ -45,13 +50,13 @@ public class EmployeeService {
     @Bulkhead(name = "employeeService")
     public Page<Employee> getAllEmployees(Pageable pageable) {
         Timer.Sample sample = metricsService.startTimer();
-        log.debug("Service: Fetching employees with pagination - page: {}, size: {}", 
-                  pageable.getPageNumber(), pageable.getPageSize());
+        log.debug("Service: Fetching employees with pagination - page: {}, size: {}",
+                pageable.getPageNumber(), pageable.getPageSize());
         Page<Employee> employeePage = employeeRepository.findAll(pageable);
-        log.debug("Service: Retrieved {} employees on page {} of {}", 
-                  employeePage.getNumberOfElements(), 
-                  employeePage.getNumber(), 
-                  employeePage.getTotalPages());
+        log.debug("Service: Retrieved {} employees on page {} of {}",
+                employeePage.getNumberOfElements(),
+                employeePage.getNumber(),
+                employeePage.getTotalPages());
         metricsService.recordEmployeeRetrieved();
         metricsService.recordTimer(sample, "getAllEmployees");
         return employeePage;
@@ -110,7 +115,8 @@ public class EmployeeService {
         return employeeRepository.findByPosition(position);
     }
 
-    @CacheEvict(value = {"employees", "employeesList", "employeesByDepartment", "employeesByPosition"}, allEntries = true)
+    @CacheEvict(value = { "employees", "employeesList", "employeesByDepartment",
+            "employeesByPosition" }, allEntries = true)
     @CircuitBreaker(name = "employeeService", fallbackMethod = "createEmployeeFallback")
     @Retry(name = "employeeService")
     @RateLimiter(name = "employeeService")
@@ -124,16 +130,17 @@ public class EmployeeService {
         }
         Employee savedEmployee = employeeRepository.save(employee);
         log.info("Service: Successfully created employee with ID: {}", savedEmployee.getId());
-        
+
         // Publish Kafka event
         publishEvent(EmployeeEvent.EventType.CREATED, savedEmployee);
-        
+
         metricsService.recordEmployeeCreated();
         metricsService.recordTimer(sample, "createEmployee");
         return savedEmployee;
     }
 
-    @CacheEvict(value = {"employee", "employees", "employeesList", "employeeByEmail", "employeesByDepartment", "employeesByPosition"}, allEntries = true)
+    @CacheEvict(value = { "employee", "employees", "employeesList", "employeeByEmail", "employeesByDepartment",
+            "employeesByPosition" }, allEntries = true)
     @CircuitBreaker(name = "employeeService", fallbackMethod = "updateEmployeeFallback")
     @Retry(name = "employeeService")
     @RateLimiter(name = "employeeService")
@@ -148,8 +155,8 @@ public class EmployeeService {
                 });
 
         // Check if email is being changed and if it's already taken by another employee
-        if (!employee.getEmail().equals(employeeDetails.getEmail()) && 
-            employeeRepository.existsByEmail(employeeDetails.getEmail())) {
+        if (!employee.getEmail().equals(employeeDetails.getEmail()) &&
+                employeeRepository.existsByEmail(employeeDetails.getEmail())) {
             log.warn("Service: Email {} is already taken by another employee", employeeDetails.getEmail());
             metricsService.recordValidationError();
             throw new DuplicateResourceException("Employee", "email", employeeDetails.getEmail());
@@ -166,17 +173,18 @@ public class EmployeeService {
 
         Employee updatedEmployee = employeeRepository.save(employee);
         log.info("Service: Successfully updated employee with ID: {}", id);
-        
+
         // Publish Kafka event
         publishEvent(EmployeeEvent.EventType.UPDATED, updatedEmployee);
-        
+
         metricsService.recordEmployeeUpdated();
         metricsService.recordTimer(sample, "updateEmployee");
-        
+
         return updatedEmployee;
     }
 
-    @CacheEvict(value = {"employee", "employees", "employeesList", "employeeByEmail", "employeesByDepartment", "employeesByPosition"}, allEntries = true)
+    @CacheEvict(value = { "employee", "employees", "employeesList", "employeeByEmail", "employeesByDepartment",
+            "employeesByPosition" }, allEntries = true)
     @CircuitBreaker(name = "employeeService", fallbackMethod = "deleteEmployeeFallback")
     @Retry(name = "employeeService")
     @RateLimiter(name = "employeeService")
@@ -189,33 +197,49 @@ public class EmployeeService {
                     metricsService.recordEmployeeNotFound();
                     return new ResourceNotFoundException("Employee", "id", id);
                 });
-        
+
         employeeRepository.deleteById(id);
         log.info("Service: Successfully deleted employee with ID: {}", id);
-        
+
         // Publish Kafka event
         publishEvent(EmployeeEvent.EventType.DELETED, employee);
-        
+
         metricsService.recordEmployeeDeleted();
         metricsService.recordTimer(sample, "deleteEmployee");
     }
-    
+
     /**
-     * Publish employee event to Kafka
+     * Publish employee event via Transactional Outbox Pattern.
+     *
+     * Interview: "Why not publish directly to Kafka?"
+     * → "Direct publish is a dual-write: DB commit + Kafka send are two separate
+     * operations. If Kafka fails after DB commit, the event is lost forever.
+     * The Outbox pattern writes the event to the DB in the SAME transaction,
+     * guaranteeing atomicity. A separate poller publishes to Kafka."
      */
     private void publishEvent(EmployeeEvent.EventType eventType, Employee employee) {
         try {
             String performedBy = getCurrentUsername();
             EmployeeEvent event = new EmployeeEvent(eventType, employee, performedBy);
-            kafkaProducerService.publishEmployeeEvent(event);
-            log.debug("Published {} event for employee ID: {}", eventType, employee.getId());
+
+            // Write to outbox table in the SAME transaction (no dual-write!)
+            OutboxEvent outboxEvent = OutboxEvent.builder()
+                    .aggregateType("Employee")
+                    .aggregateId(String.valueOf(employee.getId()))
+                    .eventType(eventType.name())
+                    .topic("employee-events")
+                    .payload(new com.fasterxml.jackson.databind.ObjectMapper()
+                            .writeValueAsString(event))
+                    .build();
+            outboxRepository.save(outboxEvent);
+
+            log.debug("Outbox: Stored {} event for employee ID: {}", eventType, employee.getId());
         } catch (Exception e) {
-            log.error("Failed to publish {} event for employee ID: {}: {}", 
-                eventType, employee.getId(), e.getMessage());
-            // Don't fail the transaction if Kafka publish fails
+            log.error("Failed to store {} event for employee ID: {}: {}",
+                    eventType, employee.getId(), e.getMessage());
         }
     }
-    
+
     /**
      * Get current authenticated username
      */
@@ -230,9 +254,9 @@ public class EmployeeService {
         }
         return "system";
     }
-    
+
     // ========== Fallback Methods for Circuit Breaker ==========
-    
+
     /**
      * Fallback method when getAllEmployees with pagination fails
      */
@@ -240,7 +264,7 @@ public class EmployeeService {
         log.error("Circuit breaker activated for getAllEmployees (pageable). Reason: {}", throwable.getMessage());
         return Page.empty(pageable);
     }
-    
+
     /**
      * Fallback method when getAllEmployees list fails
      */
@@ -248,7 +272,7 @@ public class EmployeeService {
         log.error("Circuit breaker activated for getAllEmployeesList. Reason: {}", throwable.getMessage());
         return List.of();
     }
-    
+
     /**
      * Fallback method when getEmployeeById fails
      */
@@ -256,7 +280,7 @@ public class EmployeeService {
         log.error("Circuit breaker activated for getEmployeeById (id: {}). Reason: {}", id, throwable.getMessage());
         throw new ResourceNotFoundException("Employee", "id", id);
     }
-    
+
     /**
      * Fallback method when createEmployee fails
      */
@@ -264,7 +288,7 @@ public class EmployeeService {
         log.error("Circuit breaker activated for createEmployee. Reason: {}", throwable.getMessage());
         throw new RuntimeException("Service temporarily unavailable. Please try again later.");
     }
-    
+
     /**
      * Fallback method when updateEmployee fails
      */
@@ -272,7 +296,7 @@ public class EmployeeService {
         log.error("Circuit breaker activated for updateEmployee (id: {}). Reason: {}", id, throwable.getMessage());
         throw new RuntimeException("Service temporarily unavailable. Please try again later.");
     }
-    
+
     /**
      * Fallback method when deleteEmployee fails
      */

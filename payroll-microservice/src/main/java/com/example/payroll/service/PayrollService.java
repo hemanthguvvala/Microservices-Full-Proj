@@ -5,6 +5,7 @@ import com.example.payroll.dto.*;
 import com.example.payroll.exception.DuplicateResourceException;
 import com.example.payroll.exception.PayrollProcessingException;
 import com.example.payroll.exception.ResourceNotFoundException;
+import com.example.payroll.lock.DistributedLock;
 import com.example.payroll.mapper.PayrollMapper;
 import com.example.payroll.model.Payroll;
 import com.example.payroll.model.Payroll.PayrollStatus;
@@ -40,8 +41,8 @@ public class PayrollService {
         if (payrollRepository.existsByEmployeeIdAndPayPeriodStart(
                 request.getEmployeeId(), request.getPayPeriodStart())) {
             throw new DuplicateResourceException(
-                "Payroll already exists for employee " + request.getEmployeeId() + 
-                " for period starting " + request.getPayPeriodStart());
+                    "Payroll already exists for employee " + request.getEmployeeId() +
+                            " for period starting " + request.getPayPeriodStart());
         }
 
         // Verify employee exists
@@ -131,6 +132,7 @@ public class PayrollService {
 
     @CacheEvict(value = "payrolls", key = "#id")
     @Transactional
+    @DistributedLock(key = "'payroll-approve-' + #id")
     public PayrollResponse approvePayroll(Long id) {
         log.info("Approving payroll with ID: {}", id);
         Payroll payroll = payrollRepository.findById(id)
@@ -152,6 +154,7 @@ public class PayrollService {
 
     @CacheEvict(value = "payrolls", key = "#id")
     @Transactional
+    @DistributedLock(key = "'payroll-process-' + #id")
     public PayrollResponse processPayment(Long id) {
         log.info("Processing payment for payroll ID: {}", id);
         Payroll payroll = payrollRepository.findById(id)

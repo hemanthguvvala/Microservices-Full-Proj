@@ -3,6 +3,7 @@ package com.example.employee.anticorruption;
 import com.example.employee.model.Employee;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 
@@ -109,10 +110,10 @@ public class LegacyPayrollSystemAdapter {
     /**
      * Business logic specific to legacy system
      */
-    private String determinePayGrade(Double salary) {
-        if (salary < 50000) return "G1";
-        if (salary < 75000) return "G2";
-        if (salary < 100000) return "G3";
+    private String determinePayGrade(BigDecimal salary) {
+        if (salary.compareTo(BigDecimal.valueOf(50000)) < 0) return "G1";
+        if (salary.compareTo(BigDecimal.valueOf(75000)) < 0) return "G2";
+        if (salary.compareTo(BigDecimal.valueOf(100000)) < 0) return "G3";
         return "G4";
     }
 

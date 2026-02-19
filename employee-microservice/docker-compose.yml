@@ -1,4 +1,14 @@
-version: '3.8'
+# ┌───────────────────────────────────────────────────────────────────────────────┐
+# │ Docker Compose — Local Development Infrastructure                           │
+# │                                                                             │
+# │ Interview: "Why use an .env file instead of hardcoding credentials?"        │
+# │ → "Docker Compose files are committed to Git. If credentials are inline,    │
+# │    they're in your repo history forever — even if you delete them later.    │
+# │    .env files are in .gitignore and loaded at runtime only."                │
+# │                                                                             │
+# │ Usage: cp .env.example .env && docker compose up -d                         │
+# │ Note: 'version' key is deprecated in Compose V2 (docker compose)           │
+# └───────────────────────────────────────────────────────────────────────────────┘
 
 services:
   # Zookeeper - Required for Kafka
@@ -12,6 +22,10 @@ services:
       - "2181:2181"
     networks:
       - employee-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   # Kafka Broker
   kafka:
@@ -31,6 +45,10 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
     networks:
       - employee-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
   # Redis - For caching
   redis:
@@ -40,9 +58,13 @@ services:
       - "6379:6379"
     networks:
       - employee-network
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis123}
     volumes:
       - redis-data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   # MongoDB - For audit logs
   mongodb:
@@ -51,13 +73,17 @@ services:
     ports:
       - "27017:27017"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: admin
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-admin}
       MONGO_INITDB_DATABASE: employee_audit_db
     networks:
       - employee-network
     volumes:
       - mongodb-data:/data/db
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   # Elasticsearch - For employee search
   elasticsearch:
@@ -74,21 +100,34 @@ services:
       - employee-network
     volumes:
       - elasticsearch-data:/usr/share/elasticsearch/data
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
   # PostgreSQL Replica (for read operations)
   postgres-replica:
     image: postgres:14
     container_name: postgres-replica
     environment:
-      POSTGRES_DB: employeedb
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-employeedb}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
       - "5433:5432"
     networks:
       - employee-network
     volumes:
       - postgres-replica-data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 networks:
   employee-network:

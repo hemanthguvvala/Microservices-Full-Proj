@@ -118,6 +118,92 @@ frontend:
       cpu: 200m
       memory: 128Mi
 
+# ── Frontend Angular ─────────────────────────────────────────────────────────
+frontendAngular:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: employee-platform/frontend-angular
+    tag: latest
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ── Notification Service ──────────────────────────────────────────────────────
+notificationService:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: employee-platform/notification-service
+    tag: latest
+  service:
+    type: ClusterIP
+    port: 8084
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilization: 70
+  env:
+    SPRING_PROFILES_ACTIVE: dev
+    SERVER_PORT: "8084"
+
+# ── Eureka Discovery Server ──────────────────────────────────────────────────
+eurekaServer:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: employee-platform/eureka-server
+    tag: latest
+  service:
+    type: ClusterIP
+    port: 8761
+  resources:
+    requests:
+      cpu: 200m
+      memory: 384Mi
+    limits:
+      cpu: 500m
+      memory: 768Mi
+  env:
+    SPRING_PROFILES_ACTIVE: dev
+    SERVER_PORT: "8761"
+
+# ── Config Server ─────────────────────────────────────────────────────────────
+configServer:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: employee-platform/config-server
+    tag: latest
+  service:
+    type: ClusterIP
+    port: 8888
+  resources:
+    requests:
+      cpu: 150m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  env:
+    SPRING_PROFILES_ACTIVE: dev
+    SERVER_PORT: "8888"
+
 # ── Ingress ───────────────────────────────────────────────────────────────────
 ingress:
   enabled: true

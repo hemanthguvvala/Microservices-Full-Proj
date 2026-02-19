@@ -1,7 +1,7 @@
 // React Query hooks for employee management
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import employeeService from '../services/employeeService'
-import type { Employee, EmployeeCreateRequest } from '../types'
+import type { EmployeeCreateRequest } from '../types'
 
 // Query keys
 export const employeeKeys = {

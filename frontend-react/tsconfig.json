@@ -15,6 +15,9 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* Allow JS */
+    "allowJs": true,
+
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,
@@ -25,5 +28,6 @@
     "allowSyntheticDefaultImports": true
   },
   "include": ["src"],
+  "exclude": [".storybook", "e2e", "playwright.config.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

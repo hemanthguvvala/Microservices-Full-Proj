@@ -1,0 +1,18 @@
+# ── Config Server — Docker Profile ────────────────────────────────────────────
+# Activated by: SPRING_PROFILES_ACTIVE=docker (set in docker-compose.yml)
+# In Docker, config-repository is copied into the container at /app/config-repository
+
+spring:
+  cloud:
+    config:
+      server:
+        native:
+          search-locations: file:/app/config-repository
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://eureka-server:8761/eureka/}
+  instance:
+    hostname: config-server
+    prefer-ip-address: true

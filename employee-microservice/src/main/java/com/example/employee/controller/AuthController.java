@@ -101,33 +101,17 @@ public class AuthController {
         user.setEmail(registerRequest.getEmail());
         user.setPassword(passwordEncoder.encode(registerRequest.getPassword()));
         
-        // Assign roles
+        // Assign roles — public registration always gets ROLE_USER only.
+        // ADMIN/MANAGER roles must be assigned by an existing admin via a separate endpoint.
+        //
+        // Interview: "Why can't users self-assign admin roles during registration?"
+        // → "Privilege escalation vulnerability. Any attacker could register as admin
+        //    and gain full access to the system. Role elevation must require
+        //    authorization from an existing privileged user."
         Set<Role> roles = new HashSet<>();
-        if (registerRequest.getRoles() == null || registerRequest.getRoles().isEmpty()) {
-            // Default role
-            Role userRole = roleRepository.findByName(Role.RoleName.ROLE_USER)
-                    .orElseThrow(() -> new RuntimeException("Error: Role not found."));
-            roles.add(userRole);
-        } else {
-            registerRequest.getRoles().forEach(role -> {
-                switch (role.toLowerCase()) {
-                    case "admin":
-                        Role adminRole = roleRepository.findByName(Role.RoleName.ROLE_ADMIN)
-                                .orElseThrow(() -> new RuntimeException("Error: Admin role not found."));
-                        roles.add(adminRole);
-                        break;
-                    case "manager":
-                        Role managerRole = roleRepository.findByName(Role.RoleName.ROLE_MANAGER)
-                                .orElseThrow(() -> new RuntimeException("Error: Manager role not found."));
-                        roles.add(managerRole);
-                        break;
-                    default:
-                        Role userRole = roleRepository.findByName(Role.RoleName.ROLE_USER)
-                                .orElseThrow(() -> new RuntimeException("Error: User role not found."));
-                        roles.add(userRole);
-                }
-            });
-        }
+        Role userRole = roleRepository.findByName(Role.RoleName.ROLE_USER)
+                .orElseThrow(() -> new RuntimeException("Error: Role not found."));
+        roles.add(userRole);
         
         user.setRoles(roles);
         userRepository.save(user);
