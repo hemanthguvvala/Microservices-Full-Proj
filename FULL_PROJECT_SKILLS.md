@@ -1,7 +1,8 @@
 # Full-Stack Microservices Project — Complete Skills & Technologies
 
-> **Total:** 5 Java microservices + React SPA + 8-service monitoring stack + CI/CD + Docker + K8s + AWS Terraform
-> **Backend:** 83 Java source files | **Frontend:** 60+ TypeScript/React files | **Infra:** 6 Dockerfiles + 2 Docker Compose
+> **Total:** 7 Java microservices + React + Angular frontends + BFF + 8-service monitoring stack + CI/CD + Docker + K8s + AWS Terraform
+> **Patterns:** 49 design patterns · **Technologies:** 98 · **Backend:** 100+ Java source files | **Frontend:** 70+ TypeScript/React/Angular files | **Infra:** 7 Dockerfiles + 2 Docker Compose
+> **NEW (Feb 2026):** analytics-service (gRPC all 4 modes + Protobuf) · Debezium CDC · OpenTelemetry (OTLP wired) · Event Sourcing Snapshots · MDC TaskDecorator · Redis KeyResolver rate limiting · useWebSocket React hook
 > **Cloud:** 15 K8s manifests + Helm chart + 8 Terraform modules | **SQL:** 4 advanced query files (window functions, CTEs, optimization)
 
 ---
@@ -20,6 +21,8 @@
 10. [API Gateway & Service Mesh](#10-api-gateway--service-mesh)
 11. [Batch Processing](#11-batch-processing)
 12. [Real-Time (WebSocket)](#12-real-time-websocket)
+12b. [gRPC & Protocol Buffers — Analytics Service](#12b-grpc--protocol-buffers--analytics-service-new)
+12c. [Change Data Capture (Debezium CDC)](#12c-change-data-capture-debezium-cdc-new)
 13. [Frontend (React + TypeScript)](#13-frontend-react--typescript)
 14. [Frontend Engineering Infrastructure](#14-frontend-engineering-infrastructure)
 15. [DevOps & Containerization](#15-devops--containerization)
@@ -333,11 +336,15 @@ Bulkhead: max 10 concurrent, max 20 queue wait
 - ✅ **Logstash** — Log pipeline with 2 workers, batch size 125
 - ✅ **Kibana** — 8.11.0, log visualization & dashboards
 
-### Distributed Tracing
-- ✅ **Micrometer Tracing** — Trace context propagation across services
-- ✅ **Zipkin** — Trace collector and UI (port 9411)
-- ✅ **Jaeger** — Alternative tracing UI (port 16686)
-- ✅ **Brave bridge** — `micrometer-tracing-bridge-brave` + `zipkin-reporter-brave`
+### Distributed Tracing (OpenTelemetry — OTLP wired)
+- ✅ **OpenTelemetry SDK** — `micrometer-tracing-bridge-otel` in employee/payroll/notification/analytics pom.xml
+- ✅ **OTLP Exporter** — `opentelemetry-exporter-otlp:2.1.0` sends traces to OTel Collector (port 4318)
+- ✅ **Sampling** — `management.tracing.sampling.probability=1.0` (100% in dev)
+- ✅ **MDC TaskDecorator** — `MdcTaskDecorator` in AsyncConfig.java captures + restores `correlationId`/`tenantId` across `@Async` thread pool boundaries
+- ✅ **Zipkin / Jaeger** — OTel Collector exports to both (port 9411 / 16686)
+
+**Why OTel over Brave?**
+> Brave (Zipkin) is proprietary to Zipkin. OTel is vendor-neutral — same instrumentation sends to Zipkin, Jaeger, Honeycomb, Datadog, GCP Cloud Trace. OTel is the CNCF standard replacing Brave/OpenTracing.
 
 ### Health Monitoring
 - ✅ **Custom HealthIndicators** — Database, Kafka, Redis checks
@@ -354,7 +361,7 @@ Bulkhead: max 10 concurrent, max 20 queue wait
 - `controller/MetricsController.java` — Metrics REST API
 
 **Interview Talking Point:**
-> "We have full observability: Prometheus scrapes metrics from all services including custom business metrics (employee creation rate, payroll processing time), Grafana displays pre-provisioned dashboards, ELK Stack (Elasticsearch + Logstash + Kibana) for centralized logging, and both Zipkin and Jaeger for distributed tracing across service boundaries. Each service has custom health indicators for its dependencies."
+> "We have full observability: Prometheus scrapes metrics from all 7 services including custom business metrics; Grafana displays pre-provisioned dashboards with SLO / Error Budget burn-rate alerts (14x burn rate = page immediately). ELK Stack for centralized structured logging. OpenTelemetry (OTLP exporter) sends traces to Jaeger/Zipkin — vendor-neutral, no lock-in. MDC TaskDecorator ensures correlationId propagates across @Async thread boundaries so traces never break. Each service has custom health indicators for all dependencies."
 
 ---
 
@@ -411,7 +418,56 @@ Bulkhead: max 10 concurrent, max 20 queue wait
 - `websocket/NotificationMessage.java` — DTO
 
 **Interview Talking Point:**
-> "Real-time notifications use STOMP over WebSocket with SockJS fallback. When an employee is created or updated, the service broadcasts to all connected dashboard clients via SimpMessagingTemplate. We support both topic-based broadcasting and user-specific queues for targeted notifications."
+> "Real-time notifications use STOMP over WebSocket with SockJS fallback. When an employee is created or updated, the service broadcasts to all connected dashboard clients via SimpMessagingTemplate. We support both topic-based broadcasting and user-specific queues for targeted notifications. On the React side, a custom `useWebSocket` hook handles exponential-backoff auto-reconnect, heartbeat ping/pong, and message history — the `NotificationFeed` component consumes it with filter tabs and a connection-status badge."
+
+---
+
+## 12b. gRPC & Protocol Buffers — Analytics Service *(NEW)*
+
+- ✅ **analytics-service** — Dedicated gRPC microservice (HTTP :8085, gRPC :9090)
+- ✅ **All 4 gRPC streaming modes** — Unary, Server-Streaming, Client-Streaming, Bidirectional Streaming
+- ✅ **Protocol Buffers 3.25** — Schema-first `.proto` file, 10 message types, 4 RPC methods
+- ✅ **protobuf-maven-plugin** — Generates Java stubs at compile time (no runtime reflection)
+- ✅ **grpc-server-spring-boot-starter 3.1** — `@GrpcService` annotation, Netty HTTP/2 server
+- ✅ **grpc-client-spring-boot-starter** — `@GrpcClient` injection in employee-service
+- ✅ **Deadline propagation** — `deadline=2s` on client stub; handles `DEADLINE_EXCEEDED` and `UNAVAILABLE` gracefully with fallback (analytics non-critical)
+- ✅ **Eureka gRPC discovery** — `discovery:///analytics-service` address; `grpc.port` registered in Eureka metadata
+- ✅ **gRPC Kafka consumer** — `EmployeeEventKafkaConsumer` (manual ACK) in analytics-service
+- ✅ **gRPC K8s Ingress** — Separate ingress with `nginx.ingress.kubernetes.io/backend-protocol: "GRPC"` for HTTP/2 passthrough
+
+**📁 Key Files:**
+- `analytics-service/src/main/proto/employee_analytics.proto` — Full .proto with 4 RPC methods
+- `analytics-service/.../grpc/EmployeeAnalyticsGrpcService.java` — `@GrpcService` all 4 modes
+- `employee-microservice/.../grpc/AnalyticsGrpcClient.java` — `@GrpcClient` with error handling
+- `analytics-service/pom.xml` — gRPC + Protobuf + OTel + Kafka deps
+- `k8s/services/analytics-service.yaml` — K8s Deployment with gRPC Ingress
+
+**Interview Talking Points:**
+> "gRPC vs REST: gRPC uses HTTP/2 multiplexing (no head-of-line blocking), binary Protobuf encoding (3–10x smaller than JSON), and strongly-typed contracts enforced at compile time. We use it for the analytics pipeline where throughput matters. The analytics-service demonstrates all 4 streaming modes in one .proto file — unary for fire-and-forget event recording, server-streaming for event feeds, and bidirectional streaming for batch ingest with per-event acks."
+
+> "Deadline propagation is critical: the gRPC client sets a 2-second deadline. If analytics is slow or down, we catch `StatusRuntimeException` with `Status.Code.DEADLINE_EXCEEDED` / `UNAVAILABLE` and fall back to logging — analytics failure never breaks the main employee creation flow."
+
+---
+
+## 12c. Change Data Capture (Debezium CDC) *(NEW)*
+
+- ✅ **Debezium PostgreSQL Connector** — Reads WAL (Write-Ahead Log) directly via replication slot
+- ✅ **pgoutput plugin** — Built into PostgreSQL 10+, no extra server plugin needed
+- ✅ **Outbox Event Router transform** — Debezium SMT routes outbox rows to correct Kafka topics
+- ✅ **Tables monitored** — `public.employees`, `public.outbox_events`, `public.event_store`
+- ✅ **Snapshot mode: initial** — Full table snapshot on first run, then streaming from WAL
+- ✅ **Heartbeat interval** — 10s heartbeat keeps replication slot alive during low-traffic periods
+- ✅ **Offset persistence** — LSN position stored in Kafka; resume exactly from last event on restart
+- ✅ **Init container pattern** — `debezium-connector-init` POSTs connector JSON only after kafka-connect healthy
+
+**📁 Key Files:**
+- `infrastructure/debezium/docker-compose-cdc.yml` — kafka-connect (debezium/connect:2.5) + init container
+- `infrastructure/debezium/employee-db-connector.json` — Full connector config (pgoutput, router, snapshot)
+
+**Interview Talking Points:**
+> "CDC vs polling outbox: our OutboxPublisher polls the outbox table every 5 seconds — that's up to 5s latency and adds SELECT load to the DB. Debezium reads the PostgreSQL WAL (Write-Ahead Log) directly via a replication slot — sub-100ms latency, zero SELECT queries, no polling overhead. pgoutput is built into PostgreSQL 10+ so no extra server plugin is required. The replication slot stores the LSN (Log Sequence Number) so no events are missed on connector restart."
+
+> "The Outbox Event Router SMT (Single Message Transform) is key: Debezium reads the raw outbox table row, the transform extracts the aggregate type and routes the payload to the correct Kafka topic automatically — e.g., `outbox.event.Employee` → `employee-events` topic."
 
 ---
 
@@ -583,31 +639,41 @@ Bulkhead: max 10 concurrent, max 20 queue wait
 ```
 PORT    SERVICE                     STACK
 ─────   ────────────────────────    ──────────────────
+3000    Frontend (React)            React 18 + TypeScript + Vite
+4201    Frontend (Angular)          Angular 17 + Signals
+4000    BFF Service                 Node.js aggregation
 5173    Frontend (Vite dev)         React + TypeScript
-8080    API Gateway                 Spring Cloud Gateway
-8081    Employee Service            Spring Boot + JPA
-8083    Payroll Service             Spring Boot + JPA
+8080    API Gateway                 Spring Cloud Gateway (WebFlux)
+8081    Employee Service            Spring Boot + CQRS + Event Sourcing
+8083    Payroll Service             Spring Boot + OpenFeign + Batch
+8084    Notification Service        Spring Boot + GraphQL + HATEOAS
+8085    Analytics Service (HTTP)    Spring Boot + Flyway + OTel   *** NEW ***
 8761    Eureka Discovery            Spring Cloud Netflix
 8888    Config Server               Spring Cloud Config
 
-5432    PostgreSQL (master)         Primary database
+9090    Analytics Service (gRPC)    gRPC all 4 streaming modes    *** NEW ***
+
+5432    PostgreSQL (master)         Primary database (3 schemas)
 5433    PostgreSQL (replica)        Read replica
-6379    Redis                       Cache + rate limiting
+6379    Redis                       Cache + rate limiting + locks
 9092    Kafka                       Event streaming
 2181    Zookeeper                   Kafka coordination
 27017   MongoDB                     Audit logs
-9200    Elasticsearch               Full-text search
+9200    Elasticsearch               Full-text search (CQRS read)
 
+8083    Debezium Kafka Connect      CDC via WAL/pgoutput          *** NEW ***
 9090    Prometheus                  Metrics collection
-3000    Grafana                     Dashboards
+3001    Grafana                     Dashboards + SLO alerts
 5601    Kibana                      Log visualization
 9411    Zipkin                      Distributed tracing
 16686   Jaeger                      Distributed tracing
+4317    OTel Collector (gRPC)       OpenTelemetry OTLP receiver  *** NEW ***
+4318    OTel Collector (HTTP)       OpenTelemetry OTLP receiver  *** NEW ***
 5000    Logstash                    Log pipeline
 9100    Node Exporter               System metrics
 ```
 
-**Total: 20 services** (5 app + 7 data/messaging + 8 monitoring)
+**Total: 23+ services** (7 app + 7 data/messaging + 9 monitoring/infra)
 
 ---
 

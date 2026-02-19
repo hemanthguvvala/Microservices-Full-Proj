@@ -531,7 +531,7 @@ LearnFullProductProj/
 
 ---
 
-## 🎉 Summary
+## 🎉 Summary (Phase 1)
 
 Your project now demonstrates:
 - **8 different technologies** (PostgreSQL, MongoDB, Elasticsearch, Redis, Kafka, etc.)
@@ -539,4 +539,117 @@ Your project now demonstrates:
 - **Production-ready features** (Monitoring, auditing, scaling, batch processing)
 - **Modern architecture** (Microservices, event-driven, distributed)
 
-You're now **interview-ready** with a project that covers most enterprise requirements! 🚀
+---
+
+## 🚀 Phase 2 — Gap Closure & Advanced Features (Feb 2026)
+
+All audit gaps identified in the previous session were implemented and are now backed by real code:
+
+---
+
+### ✅ NEW: analytics-service — gRPC Microservice (7th service)
+
+**Location**: `analytics-service/`
+
+**What it is**: A dedicated Spring Boot microservice that serves as the gRPC server, demonstrating all 4 gRPC streaming modes in a single `.proto` contract.
+
+| Feature | Detail |
+|---------|--------|
+| gRPC server port | 9090 (HTTP/2) |
+| HTTP actuator port | 8085 |
+| Protobuf | `employee_analytics.proto` — 4 RPC methods, 10 message types |
+| gRPC Unary | `RecordEmployeeEvent` — fire-and-forget analytics |
+| gRPC Server-Streaming | `StreamEmployeeEvents` — event feed |
+| gRPC BiDi-Streaming | `StreamBatchEvents` — batch ingest with per-event acks |
+| Kafka consumer | `@KafkaListener` with manual ACK |
+| DB | PostgreSQL + Flyway V1 migration |
+| K8s | Separate gRPC Ingress (`backend-protocol: GRPC`) |
+
+**Interview value**: Can answer "gRPC vs REST", "when to use each streaming mode", "how gRPC discovery works with Eureka", "how you handle gRPC errors gracefully".
+
+---
+
+### ✅ NEW: gRPC Client in employee-service
+
+**File**: `employee-microservice/.../grpc/AnalyticsGrpcClient.java`
+
+- `@GrpcClient("analytics-service")` — auto-discovered via Eureka
+- Blocking stub with 2-second deadline
+- `StatusRuntimeException` switch: `UNAVAILABLE` / `DEADLINE_EXCEEDED` → log + continue (non-critical)
+- `grpc-client-spring-boot-starter` + `os-maven-plugin` + `protobuf-maven-plugin` added to pom.xml
+
+---
+
+### ✅ NEW: Debezium CDC
+
+**Location**: `infrastructure/debezium/`
+
+- `docker-compose-cdc.yml` — kafka-connect (debezium/connect:2.5) with healthcheck + init container
+- `employee-db-connector.json` — PostgreSQL connector config: pgoutput plugin, Outbox Event Router SMT, snapshot.mode=initial, heartbeat 10s
+- Tables: `public.employees`, `public.outbox_events`, `public.event_store`
+- Kafka topics: `cdc.public.employees`, etc.
+
+---
+
+### ✅ FIXED: OpenTelemetry (Brave → OTel on all services)
+
+**Files**: `payroll-microservice/pom.xml`, `notification-microservice/pom.xml`, `employee-microservice/pom.xml`
+
+- Replaced `micrometer-tracing-bridge-brave` + `zipkin-reporter-brave`
+- With `micrometer-tracing-bridge-otel` + `opentelemetry-exporter-otlp:2.1.0`
+- Added `management.otlp.tracing.endpoint` config
+- Now vendor-neutral: same instrumentation → Zipkin, Jaeger, Honeycomb, Datadog
+
+---
+
+### ✅ FIXED: MDC TaskDecorator (Async Context Propagation)
+
+**File**: `employee-microservice/.../config/AsyncConfig.java`
+
+- `mdcTaskDecorator()` @Bean captures `MDC.getCopyOfContextMap()` + `RequestAttributes` on the calling thread
+- Restores on async worker thread, clears in `finally` block (prevents thread pool MDC leaks)
+- Wired via `executor.setTaskDecorator(mdcTaskDecorator())`
+- Ensures `correlationId`, `tenantId` appear in logs of all `@Async` methods
+
+---
+
+### ✅ FIXED: Event Sourcing Snapshots
+
+**Files**: `employee-microservice/.../eventsourcing/EventSnapshot*.java`, `EventSourcingService.java`, `V6__Create_event_snapshots_table.sql`
+
+- `SNAPSHOT_THRESHOLD = 100` — auto-snapshot after every 100 events
+- `replayAggregate()`: finds latest snapshot → loads only delta events since that version → O(delta) vs O(n)
+- `checkAndTakeSnapshot()` called after every `appendEvent()`, snapshot failure does NOT propagate
+
+---
+
+### ✅ FIXED: Gateway Redis Rate Limiting KeyResolver
+
+**File**: `api-gateway-service/.../config/GatewayRateLimiterConfig.java`
+
+- `userKeyResolver` @Primary — extracts JWT `sub` claim from Bearer token, falls back to IP
+- `apiKeyResolver` — `X-API-Key` header
+- `ipKeyResolver` — `X-Forwarded-For` header
+- 3 rate limiter tiers: default (10/s burst 20), analytics (2/s burst 5), health (1000/s)
+
+---
+
+### ✅ NEW: WebSocket React Hook + NotificationFeed
+
+**Files**: `frontend-react/src/hooks/useWebSocket.ts`, `.../components/NotificationFeed.tsx`
+
+- `useWebSocket`: auto-reconnect with exponential backoff (1s, 2s, 4s...), heartbeat every 30s, message history (100 msgs), `WsStatus` type
+- `NotificationFeed`: filter tabs by event type, color-coded cards, sound toggle, expandable detail, connection badge
+
+---
+
+## 📊 Updated Counts
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Services | 6 | **7** |
+| Classes | 173 | **191** |
+| Patterns | 42 | **49** |
+| Technologies | 89 | **98** |
+| Mermaid diagrams | 8 | **12** |
+| ADRs | 7 | **9** |
