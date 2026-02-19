@@ -105,6 +105,73 @@ function buildFileTree(basePath, relativePath, depth, maxDepth) {
   }
 }
 
+// API: List all project documentation markdown files
+app.get('/api/docs', (req, res) => {
+  const basePath = path.join(__dirname, '..');
+  const docs = [];
+
+  // Collect root-level .md files
+  fs.readdirSync(basePath).forEach(f => {
+    if (f.endsWith('.md')) {
+      const full = path.join(basePath, f);
+      const stat = fs.statSync(full);
+      docs.push({ name: f, path: f, size: stat.size, category: 'Project Root' });
+    }
+  });
+
+  // Collect docs/ folder
+  const docsDir = path.join(basePath, 'docs');
+  if (fs.existsSync(docsDir)) {
+    fs.readdirSync(docsDir).forEach(f => {
+      if (f.endsWith('.md')) {
+        const full = path.join(docsDir, f);
+        const stat = fs.statSync(full);
+        docs.push({ name: f, path: 'docs/' + f, size: stat.size, category: 'Documentation' });
+      }
+    });
+    // ADR subfolder
+    const adrDir = path.join(docsDir, 'adr');
+    if (fs.existsSync(adrDir)) {
+      fs.readdirSync(adrDir).forEach(f => {
+        if (f.endsWith('.md')) {
+          const full = path.join(adrDir, f);
+          const stat = fs.statSync(full);
+          docs.push({ name: f, path: 'docs/adr/' + f, size: stat.size, category: 'Architecture Decision Records' });
+        }
+      });
+    }
+    // diagrams subfolder
+    const diagDir = path.join(docsDir, 'diagrams');
+    if (fs.existsSync(diagDir)) {
+      fs.readdirSync(diagDir).forEach(f => {
+        if (f.endsWith('.md')) {
+          const full = path.join(diagDir, f);
+          const stat = fs.statSync(full);
+          docs.push({ name: f, path: 'docs/diagrams/' + f, size: stat.size, category: 'Diagrams' });
+        }
+      });
+    }
+  }
+
+  // Service-level docs
+  const serviceDirs = ['employee-microservice', 'payroll-microservice', 'notification-microservice',
+    'api-gateway-service', 'eureka-discovery-server', 'config-server', 'frontend-react', 'frontend-angular'];
+  serviceDirs.forEach(svc => {
+    const svcPath = path.join(basePath, svc);
+    if (fs.existsSync(svcPath)) {
+      fs.readdirSync(svcPath).forEach(f => {
+        if (f.endsWith('.md')) {
+          const full = path.join(svcPath, f);
+          const stat = fs.statSync(full);
+          docs.push({ name: f, path: svc + '/' + f, size: stat.size, category: svc });
+        }
+      });
+    }
+  });
+
+  res.json(docs);
+});
+
 app.listen(PORT, () => {
   console.log(`\n🏗️  Architecture UML Server running at http://localhost:${PORT}\n`);
   console.log('  Views:');
@@ -114,5 +181,7 @@ app.listen(PORT, () => {
   console.log('  • Data Flow            - Request/event sequence diagrams');
   console.log('  • Infrastructure       - Docker / K8s / Helm / Terraform');
   console.log('  • Technology Stack     - Categorized tech radar');
-  console.log('  • Project Structure    - Interactive file explorer\n');
+  console.log('  • Project Structure    - Interactive file explorer');
+  console.log('  • Documentation        - All project markdown docs');
+  console.log('  • Interview KB         - 100+ Q&As with code examples\n');
 });

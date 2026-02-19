@@ -918,6 +918,72 @@ body {
   line-height: 1.6;
 }
 
+/* ---------- Markdown Rendered Docs ---------- */
+.md-rendered {
+  font-size: 0.9rem;
+  line-height: 1.8;
+  color: var(--text-secondary);
+}
+.md-rendered h1, .md-rendered h2, .md-rendered h3, .md-rendered h4 {
+  color: var(--text-primary);
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+.md-rendered h1 { font-size: 1.4rem; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+.md-rendered h2 { font-size: 1.2rem; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.md-rendered h3 { font-size: 1.05rem; }
+.md-rendered code {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  background: var(--bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--orange);
+}
+.md-rendered pre {
+  background: #0d1117;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 18px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+.md-rendered pre code {
+  color: #e6edf3;
+  background: none;
+  padding: 0;
+  line-height: 1.6;
+}
+.md-rendered table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 0.85rem;
+}
+.md-rendered th, .md-rendered td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+}
+.md-rendered th {
+  background: var(--bg-tertiary);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.md-rendered blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 12px 0;
+  padding: 8px 16px;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  border-radius: 0 8px 8px 0;
+}
+.md-rendered a { color: var(--accent); }
+.md-rendered ul, .md-rendered ol { padding-left: 24px; }
+.md-rendered li { margin-bottom: 4px; }
+.md-rendered hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+.doc-item:hover { background: var(--bg-hover) !important; }
+
 /* ---------- Stats Bar ---------- */
 .stats-bar {
   display: flex;

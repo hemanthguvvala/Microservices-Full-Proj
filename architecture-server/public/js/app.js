@@ -66,6 +66,7 @@
       infrastructure: renderInfrastructure,
       techstack: renderTechStack,
       structure: renderStructure,
+      docs: renderDocs,
       interview: renderInterview,
     };
     if (renderers[view]) renderers[view]();
@@ -777,6 +778,92 @@
     if (name === 'Makefile') return '🔧';
     return '📄';
   }
+
+  // ─── Documentation View ───────────────────────
+  function renderDocs() {
+    content.innerHTML = `
+      <div class="animate-in">
+        <div class="view-header">
+          <h2>📖 Project Documentation</h2>
+          <p>All markdown documentation from this project — guides, ADRs, runbooks, and more</p>
+        </div>
+        <div id="docs-loading" style="text-align:center;padding:40px;color:var(--text-muted);">Loading documentation index...</div>
+        <div id="docs-container" style="display:none;"></div>
+        <div id="docs-reader" style="display:none;">
+          <button class="kb-tab active" onclick="window.__closeMdReader()" style="margin-bottom:16px;">← Back to Doc List</button>
+          <div id="docs-reader-title" style="font-size:1.1rem;font-weight:600;margin-bottom:16px;"></div>
+          <div id="docs-reader-body" class="md-rendered"></div>
+        </div>
+      </div>
+    `;
+
+    fetch('/api/docs')
+      .then(r => r.json())
+      .then(docs => {
+        const byCategory = {};
+        docs.forEach(d => {
+          if (!byCategory[d.category]) byCategory[d.category] = [];
+          byCategory[d.category].push(d);
+        });
+
+        const html = Object.entries(byCategory).map(([cat, files]) => `
+          <div class="kb-category expanded" style="margin-bottom:16px;">
+            <div class="kb-category-header" onclick="this.parentElement.classList.toggle('expanded')">
+              <h3>📁 ${cat}</h3>
+              <span style="color:var(--text-muted);font-size:0.8rem;">${files.length} file${files.length>1?'s':''}</span>
+            </div>
+            <div class="kb-category-body">
+              ${files.map(f => `
+                <div class="doc-item" onclick="window.__openMdDoc('${f.path}', '${f.name.replace(/'/g, "\\'")}')" style="padding:10px 14px;margin-bottom:6px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;border:1px solid var(--border);transition:background var(--transition);">
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <span>📝</span>
+                    <div>
+                      <div style="font-weight:500;font-size:0.9rem;">${f.name}</div>
+                      <div style="font-size:0.75rem;color:var(--text-muted);">${f.path}</div>
+                    </div>
+                  </div>
+                  <span style="font-size:0.75rem;color:var(--text-muted);">${(f.size / 1024).toFixed(1)} KB</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `).join('');
+
+        document.getElementById('docs-loading').style.display = 'none';
+        const container = document.getElementById('docs-container');
+        container.innerHTML = html;
+        container.style.display = 'block';
+      })
+      .catch(() => {
+        document.getElementById('docs-loading').innerHTML = '<p style="color:var(--red);">Failed to load docs index.</p>';
+      });
+  }
+
+  window.__openMdDoc = function (filePath, fileName) {
+    document.getElementById('docs-container').style.display = 'none';
+    const reader = document.getElementById('docs-reader');
+    reader.style.display = 'block';
+    document.getElementById('docs-reader-title').textContent = fileName;
+    document.getElementById('docs-reader-body').innerHTML = '<p style="color:var(--text-muted);">Loading...</p>';
+
+    fetch('/api/file?path=' + encodeURIComponent(filePath))
+      .then(r => r.json())
+      .then(data => {
+        if (typeof marked !== 'undefined') {
+          document.getElementById('docs-reader-body').innerHTML = marked.parse(data.content);
+        } else {
+          document.getElementById('docs-reader-body').innerHTML = '<pre style="white-space:pre-wrap;font-size:0.85rem;line-height:1.7;">' + data.content.replace(/</g,'&lt;') + '</pre>';
+        }
+      })
+      .catch(() => {
+        document.getElementById('docs-reader-body').innerHTML = '<p style="color:var(--red);">Failed to load file.</p>';
+      });
+  };
+
+  window.__closeMdReader = function () {
+    document.getElementById('docs-reader').style.display = 'none';
+    document.getElementById('docs-container').style.display = 'block';
+  };
 
   // ─── Interview View ───────────────────────────
   function renderInterview() {
