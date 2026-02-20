@@ -986,3 +986,285 @@ SQL:
   ✓ @Version optimistic locking in Hibernate
   ✓ N+1 prevention: JOIN FETCH, @EntityGraph, @BatchSize
 ```
+
+---
+
+## 6. Mock Interview — Live Q&A Session
+
+> All answers below are grounded in actual code files.
+> Use these as rehearsed answers, not scripts — know the code, not the paragraph.
+
+---
+
+### Q2: "Why Event Sourcing for employee data?"
+
+**Code reference**: `employee-microservice/.../eventsourcing/EventSourcingService.java`
+
+**Key facts from code**:
+- `SNAPSHOT_THRESHOLD = 100` — snapshot auto-created every 100 events
+- `replayAggregate()` loads latest snapshot + delta events only → O(delta), not O(n)
+- Snapshot failure is try-catch isolated — snapshot fail never fails the main event write
+
+**90-second answer**:
+
+> CRUD destroys history entirely — an audit table is a side-effect that can drift or be skipped. With Event Sourcing, events are immutable append-only truth; the current state is a derived view.
+>
+> The business justification here is HR compliance — you need to know *who changed what, and when*, not just the current value. Event Sourcing gives you that natively.
+>
+> The performance concern is replay cost. We solve it with snapshots: every 100 events we materialize a snapshot. On read, we load the latest snapshot plus only the delta events since then — worst case 99 events, not the full history. Snapshot failure is caught and swallowed; it never blocks the event write.
+
+**Gaps to name if asked**:
+- No CQRS read model yet — reads query the same event store
+- Snapshot strategy is count-based (every 100 events), not complexity-based
+
+---
+
+### Q3: "Two managers edit the same employee record simultaneously — who wins?"
+
+**Code reference**: `employee-microservice/.../eventsourcing/EventStore.java` + Flyway V4 migration
+
+**Key facts from code**:
+- V4 migration adds `UNIQUE (aggregate_id, aggregate_type, event_version)` on the `event_store` table
+- First writer commits event at version N — second writer tries same version N → `DataIntegrityViolationException` → transaction rolls back
+- No `expectedVersion` parameter on the public API today
+
+**90-second answer**:
+
+> The concurrency guard is a database `UNIQUE` constraint across `(aggregate_id, aggregate_type, event_version)` — added in Flyway V4 migration.
+>
+> When two managers submit simultaneously, both generate event version N. The first to hit the DB commits. PostgreSQL's unique constraint rejects the second insert with a constraint violation. Spring wraps that as `DataIntegrityViolationException` — first writer wins, second gets a transaction rollback.
+>
+> Current gap: it returns a 500. Production-correct is a 409 Conflict with a message like "record updated since you loaded it, please refresh." The proper fix is an explicit `expectedVersion` parameter on the command — client sends the version it read, server rejects if current version differs. Classic optimistic concurrency.
+
+---
+
+### Q4: "Walk me through the Saga for a new hire — what are the steps, and what happens if step 3 fails?"
+
+**Code reference**: `employee-microservice/.../saga/EmployeeOnboardingSaga.java` + `SagaInstance.java`
+
+**Key facts from code**:
+- 4 steps: `CREATE_EMPLOYEE` → `CREATE_PAYROLL` (Feign HTTP) → `SEND_WELCOME_EMAIL` → `GRANT_SYSTEM_ACCESS`
+- `SagaStatus` enum: `STARTED / IN_PROGRESS / COMPLETED / COMPENSATING / FAILED / COMPENSATED`
+- Compensation iterates `stepStatuses` in reverse — CREATE_PAYROLL compensation deletes payroll record
+- Email compensation is semantic (can't unsend) — gated by `isEmailSent` flag, sends a cancellation email instead
+- `sagaData` carries JSON context forward (employeeId, payrollId, etc.)
+
+**90-second answer**:
+
+> Four steps: create employee record, create payroll record via Feign HTTP call, send welcome email, grant system access. State machine tracks `STARTED → IN_PROGRESS → COMPLETED`.
+>
+> If step 3 (email) fails — which means the email service is down — the saga enters `COMPENSATING` state. Compensation runs in reverse: revoke system access (not granted yet), skip email (it failed), delete payroll record, delete employee record. Each step's `compensate()` is idempotent.
+>
+> Email is a special case: you can't unsend an email. If the email sent successfully but the next step failed, compensation doesn't try to "un-email" — instead it sends a cancellation email. This is called semantic compensation, and it's gated by an explicit `isEmailSent` boolean on the saga data.
+>
+> **Limitation I'd flag**: this is a synchronous in-process orchestrator. If the pod dies mid-saga, the in-flight saga instance is lost. Production-correct is an event-driven orchestrator with saga state persisted to DB and Kafka events driving transitions.
+
+---
+
+### Q5: "API Gateway rate limiting — how does it actually work?"
+
+**Code reference**: `api-gateway-service/.../config/GatewayRateLimiterConfig.java` + `GatewayConfig.java`
+
+**Key facts from code**:
+- Token bucket: `replenishRate=10 req/s`, `burstCapacity=20`
+- Redis Lua script executes atomically — no TOCTOU race
+- 3 `KeyResolver` beans: JWT (`user:<hash>`), IP (`ip:x.x.x.x`), API key (`api:<key>`)
+- `@Primary` on JWT resolver — active by default
+- Redis down → fail closed (deny all traffic)
+
+**90-second answer**:
+
+> Token bucket algorithm — each user gets a conceptual bucket refilled at 10 tokens/second, bursting up to 20. Each request consumes one token. At burst capacity, requests 11-20 are accepted; 21+ are rejected with 429.
+>
+> State lives in Redis. The increment and check is a Lua script that runs atomically on the Redis instance — no two Gateway pods can race on the same key. That's important because the Gateway is horizontally scaled.
+>
+> There are three key resolution strategies: by JWT subject (default), by IP, by API key header. JWT per-user is the `@Primary` — we don't use IP because a corporate proxy makes all 500 employees look like one IP.
+>
+> **Failure mode**: if Redis goes down, the rate limiter fails closed — it denies all traffic. That's a deliberate choice for security, but in practice it means Redis is in your critical path. Production fix is Redis Sentinel or Cluster, plus a circuit breaker that can fail-open for specific routes.
+
+---
+
+### Q6: "Why did you add Debezium CDC if you already had the Outbox pattern?"
+
+**Code reference**: `employee-microservice/.../outbox/OutboxEventPublisher.java` + `infrastructure/debezium/employee-db-connector.json`
+
+**Key facts from code**:
+- `OutboxEventPublisher`: `@Scheduled(fixedDelay=5000)` — 5-second polling latency floor
+- `.get(10, SECONDS)` blocking send — tied to app pod lifecycle
+- Debezium: `pgoutput` logical decoding, `debezium_employee_slot` replication slot, Outbox Event Router SMT
+- SMT reads `type` + `aggregateType` → routes to `employee.${routedByValue}.events` topics
+
+**90-second answer**:
+
+> The polling Outbox solves dual-write, but has three structural problems: 5-second latency floor, constant SELECT pressure on the outbox table, and liveness tied to the app pod — if the pod crashes mid-batch, events are delayed until restart.
+>
+> Debezium reads the PostgreSQL WAL via `pgoutput` logical replication. The replication slot (`debezium_employee_slot`) guarantees no row is skipped — it tracks LSN so even a Debezium restart catches up. Latency drops to sub-100ms.
+>
+> The Outbox Event Router SMT transforms raw CDC records into domain events. It reads the `type` and `aggregateType` columns and routes to dynamically named Kafka topics — `employee.employee.events`, `employee.payroll.events` — without any application code.
+>
+> We kept both: Outbox for application-initiated events where transactional consistency is paramount, Debezium for high-throughput change streams. They serve different consumers.
+>
+> **Gap I'd flag**: the replication slot holds WAL until Debezium consumes it. If the connector is down for hours, WAL bloat can fill the disk. We learned this in staging — connector crashed, 6 hours later disk was full. Fix: monitor `confirmed_flush_lsn` advancing and alert if it stalls.
+
+---
+
+### Q7: "How does the notification service deduplicate — what if Kafka delivers a message twice?"
+
+**Code reference**: `notification-microservice/.../kafka/KafkaConsumerService.java`
+
+**Key facts from code**:
+- `@KafkaListener` calls `notificationService.create()` directly
+- **No deduplication logic exists** — every message triggers a new notification record
+
+**Honest answer** (this is a known gap — own it, frame it):
+
+> Honestly, it doesn't — and that's a real gap.
+>
+> The current `KafkaConsumerService` calls `notificationService.create()` for every message with no idempotency check. At-least-once delivery from Kafka means a rebalance, pod restart, or broker hiccup can redeliver a message and result in duplicate notifications — duplicate emails or SMS.
+>
+> The correct fix is a `processed_events` table with a unique constraint on `(event_id, consumer_group)`. Before processing, check if the event ID already exists. Wrap the business write and the `processedEvent.save()` in a single `@Transactional` block — the constraint prevents concurrent double-inserts.
+>
+> There's a second gap: the Outbox event payload doesn't surface a globally unique `eventId` into the Kafka message. Without that, consumers can't even perform the check. Fix: include a `correlationId` or `eventId` derived from the outbox row's UUID in the Kafka message headers or payload.
+>
+> Shipping without this was a calculated risk — the failure mode is duplicate notifications, not data corruption. Production fix is straightforward; it just wasn't prioritized in the initial build.
+
+**Gap framing formula** (memorize this):
+> *"Current implementation does X. Production-correct is Y because [specific failure mode]. We shipped X because [honest reason — time, priority, calculated risk]."*
+
+---
+
+### Q8: "You chose gRPC bidi streaming for analytics — why that mode specifically?"
+
+**Code reference**: `analytics-service/.../grpc/EmployeeAnalyticsGrpcService.java` + `employee_analytics.proto`
+
+**Key facts from code**:
+- `StreamBatchEvents` is bidi streaming — client streams batches, server acks each
+- `synchronized(responseObserver)` — StreamObserver is NOT thread-safe
+- `BatchEventAck` carries `eventsProcessed`, `status`, `message`
+- `onError()` vs `onNext(nack)` — NACK keeps stream alive, `onError` terminates it
+
+**90-second answer**:
+
+> The analytics use case is bulk historical backfill — clients send millions of events from warehouse exports. Four mode options in gRPC: unary, server-stream, client-stream, bidi.
+>
+> Unary per event means N round trips — prohibitive. Client streaming gives one response at end of batch, but no per-item acknowledgment — if the server processes 90% and crashes, the client doesn't know which 90% to skip on retry.
+>
+> Bidi streaming gives you one persistent HTTP/2 connection. Client pipelines batches; server acks each batch individually via `BatchEventAck`. If batch 7 fails, server sends a NACK for batch 7 only — client can retry that specific batch while batches 8-10 continue in flight. That's the key operational advantage.
+>
+> Implementation detail worth flagging: `StreamObserver` is not thread-safe. If the processing logic is async, you must synchronize before calling `responseObserver.onNext()`. That's the `synchronized(responseObserver)` block in the code.
+>
+> Design choice on errors: for a bad batch we send `onNext(nack)` not `onError()`. `onError` terminates the entire stream. NACK keeps it alive for the rest of the batch. `onError` is reserved for unrecoverable stream-level failures.
+
+---
+
+### Q9: "Tell me about a time you had a technical disagreement with your team."
+
+> *(Behavioral STAR answer — no code lookup needed)*
+
+**Situation**: Designing the event pipeline. Engineer A wanted to keep only the polling Outbox — "it works, it's simple, no new infra." Engineer B wanted Debezium CDC — sub-100ms latency, WAL-native. Both were right about their own concerns.
+
+**Task**: As lead, I needed a decision without losing consensus or bulldozing either position.
+
+**Action**: Before the architecture meeting I asked each engineer to prepare the *other's* argument — A had to present the case for Debezium, B had to present the case for Outbox. This steelmanning exercise de-escalated it immediately. It stopped being "my idea vs your idea" and became "which tradeoffs do we accept?"
+
+Resolution: run both. Outbox for transaction-critical application events (guaranteed dual-write with business data). Debezium for high-throughput change streams consumed downstream. Different consumers, different SLAs.
+
+**Result**: Shipped both paths. Six weeks later in staging, Debezium connector crashed and ran unmonitored for 6 hours — WAL bloat filled the disk. A's concern about operational complexity was validated. We added monitoring on `confirmed_flush_lsn` and an alert on slot lag. I made sure A presented this at the team retrospective — framed as "A's concern was right, here's the runbook we now have," not "I was wrong."
+
+**What I'd do differently**: The ADR for Debezium (ADR-011) should have listed *operational prerequisites* — replication slot monitoring — as conditions for merging, not as follow-up items. Shipping the infra without the monitoring was the actual gap.
+
+---
+
+### Q10: "Walk me through an Architecture Decision Record you wrote."
+
+**Code reference**: `docs/adr/ADR-010-gRPC-for-analytics-service.md`
+
+**Key facts from code**:
+- Alternatives table: REST (rejected — no streaming differentiation), Kafka-only (rejected — no per-item ack), gRPC (chosen)
+- Consequences: `+` Protobuf type safety, compile-time breaking change detection; `-` two `.proto` copies, no shared module
+- Gap documented: field number drift between client and server proto copies → silent Protobuf corruption
+
+**90-second answer**:
+
+> ADR-010 chose gRPC over REST and Kafka-only for the analytics service.
+>
+> REST was eliminated because HTTP/1.1 request-per-event is prohibitive for batch backfill, and REST streaming is non-standard. Kafka-only was honestly considered — simpler infra, team already knew it. I documented *why we didn't choose it*: Kafka has no per-item acknowledgment on produce; we'd lose granular NACK capability for partial-batch failures.
+>
+> The real production justification I sharpen it to now: Protobuf schema contract with compile-time breaking change detection. A field rename in REST JSON or Kafka Avro without a schema registry is invisible until runtime — null pointer or type error in production at 2am. With `.proto` files and generated stubs, it blows up the build.
+>
+> What I'd change about the ADR format: there's a documented gap — two copies of the `.proto` file, one in analytics-service and one in the client. Field number drift between them causes silent Protobuf corruption (no error thrown; fields silently deserialize to zero/empty). I documented this as a follow-up item. It should have been a **prerequisite condition** for merging. I now structure ADRs with a "Conditions" section — things that must be true before this decision ships, not things we'll fix later.
+
+---
+
+## 7. Interview Performance Feedback
+
+> Received after the 10-question mock session. Use as a calibration baseline.
+
+### Overall Verdict: **Strong Hire at Lead Level** (touching Staff territory)
+
+| Dimension | Score | Notes |
+|---|---|---|
+| Technical depth | 9/10 | Code-grounded, specific values, honest about limits |
+| System design thinking | 9/10 | Named failure modes and production gaps unprompted |
+| Honest self-assessment | 10/10 | Named gaps before being asked — deduplication, WAL bloat |
+| Leadership & conflict resolution | 8/10 | Good story; could sharpen the "what I'd do differently" |
+| Answer conciseness | 6/10 | Tendency to over-explain; interviewers have to interrupt |
+| Handling gaps under pressure | 8/10 | Good framing; needs tighter "gap sentence" formula |
+
+---
+
+### Three Areas to Sharpen
+
+#### 1. Answer Length — Lead with the headline
+
+**Pattern**: Give the 90-second answer, then pause. Say: *"Want me to go deeper on any of that?"*
+
+Never front-load all the depth. Interviewers who want more will ask. Those who don't will be lost before you hit your best point.
+
+> **Rule**: answer → pause → offer depth. Not depth → more depth → summary.
+
+#### 2. Gap Framing — Memorize this sentence
+
+> *"Current implementation does X. Production-correct is Y because [specific failure mode]. We shipped X because [honest reason — time, priority, calculated risk]."*
+
+Apply to every known gap:
+- **Deduplication**: Current = none. Correct = `processed_events` table + unique constraint. Shipped without because failure mode is duplicate notification, not data corruption.
+- **Concurrency**: Current = 500 on version conflict. Correct = 409 + `expectedVersion` param. Shipped without because Outbox throughput is low.
+- **Proto sync**: Current = two copies. Correct = shared lib / proto registry. Shipped without because internal service boundary, caught at deploy time anyway.
+
+#### 3. ADR Business Justification — One crisp sentence
+
+> *"The real production justification is Protobuf schema contract and compile-time breaking change detection — a field rename in REST JSON or Kafka Avro is invisible until runtime. With `.proto`, it blows up the build, not production at 2am."*
+
+Always anchor ADR choices to a **specific failure mode in the alternative**, not just "it's better."
+
+---
+
+### Next Behavioral Areas to Drill
+
+#### Operational Incident Story
+**Question**: *"Tell me about a time something broke in production."*
+
+**Material**: WAL bloat in staging — Debezium connector crashed, ran unmonitored 6 hours, disk filled.
+
+**Structure to use**:
+1. Timeline — when detected, what the symptom was (disk alert, not Debezium alert)
+2. Immediate remediation — drop the inactive replication slot, restart connector
+3. Root cause — no monitoring on `confirmed_flush_lsn` / slot lag
+4. Preventive change — `pg_replication_slots` query added to dashboards, PagerDuty alert on stall > 30 min
+5. What you'd do differently — slot lag in ADR-011 as a prerequisite, not a follow-up
+
+#### Stakeholder Communication
+**Question**: *"How do you explain a technical delay or architecture decision to a non-technical stakeholder?"*
+
+**Material**: Adding Debezium increased infra complexity. Frame it as:
+> "We added a component that costs some operational overhead but eliminates a class of data-consistency bugs that would cost significantly more in customer trust and manual recovery per incident."
+
+**Rule**: Never say "technical debt" to a product manager. Say "risk we deferred" and name the specific risk and its consequence.
+
+#### Team Growth
+**Question**: *"How did you help a junior engineer level up?"*
+
+**Material**: Brought junior engineers into the ADR process — not just implementing, but writing the alternatives table. Steelmanning exercise as a learning tool. Had Engineer A present the WAL bloat retrospective at team meeting — ownership of the lesson, not blame.
+
+**Key point**: Growth isn't just code review; it's giving ownership of a decision and its post-mortem, including when it doesn't go perfectly.
