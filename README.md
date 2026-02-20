@@ -105,7 +105,7 @@ React 18 · TypeScript 5.3 · Vite · TailwindCSS · Redux Toolkit · React Quer
 JUnit 5 · Mockito · Testcontainers · JaCoCo · Pact (consumer-driven contracts) · SonarQube · k6 (load tests)
 
 ### CI/CD
-GitHub Actions (12 pipelines) · SonarQube · Multi-cloud deploy (ECR/ACR/Artifact Registry → EKS/AKS/GKE) · Terraform multi-cloud plan/apply · OIDC federation (all 3 clouds)
+GitHub Actions (14 pipelines) · Jenkins (Jenkinsfile — declarative, 11 stages) · SonarQube · Nexus artifact publishing · Multi-cloud deploy (ECR/ACR/Artifact Registry → EKS/AKS/GKE) · Terraform multi-cloud plan/apply · OIDC federation (all 3 clouds) · JAR + WAR packaging
 
 ---
 
@@ -169,7 +169,8 @@ helm install employee-platform helm/employee-platform/ -f helm/employee-platform
 ## Project Structure
 
 ```
-├── .github/workflows/          # 12 CI/CD pipelines (incl. multi-cloud deploy)
+├── .github/workflows/          # 14 CI/CD pipelines (incl. multi-cloud deploy)
+├── Jenkinsfile                 # Jenkins declarative pipeline (11 stages, JAR/WAR)
 ├── analytics-service/          # NEW — gRPC analytics (HTTP:8085, gRPC:9090)
 ├── api-gateway-service/        # Spring Cloud Gateway + Redis KeyResolver
 ├── config-server/              # Spring Cloud Config Server
@@ -232,7 +233,7 @@ Namespace, ConfigMaps, Secrets, Ingress, 7 service deployments, PostgreSQL, Redi
 | **Security** | JWT + RBAC · Keycloak OIDC/PKCE · Redis Rate Limiting (3 KeyResolver strategies) · External Secrets · Zero-Trust |
 | **Observability** | Prometheus · Grafana · OpenTelemetry (OTLP wired) · ELK · MDC TaskDecorator · SLO / Error Budget |
 | **API Design** | REST · GraphQL · HATEOAS · WebSocket · gRPC · OpenAPI |
-| **Cloud & DevOps** | Docker · K8s · Helm · Kustomize · ArgoCD (GitOps) · KEDA · Chaos Mesh · Terraform (AWS + Azure + GCP) · Multi-cloud strategy pattern · OIDC federation |
+| **Cloud & DevOps** | Docker (multi-stage, JAR+WAR targets) · Jenkins (Jenkinsfile) · K8s · Helm · Kustomize · ArgoCD (GitOps) · KEDA · Chaos Mesh · Terraform (AWS + Azure + GCP) · Multi-cloud strategy pattern · OIDC federation |
 | **Testing** | JUnit 5 · Mockito · Testcontainers · Pact (contract) · Playwright (E2E) · k6 (load) · SonarQube |
 | **Distributed Systems** | Distributed Locking · Idempotency Keys · Multi-Tenancy · Feature Flags · Blue-Green Deploy · Canary |
 

@@ -1,0 +1,46 @@
+# =============================================================================
+# .dockerignore — Employee Microservice
+# Reduces Docker build context size: ~500MB → ~5MB (100× faster COPY)
+# Interview: "Without .dockerignore, Docker sends the entire directory
+#   (including target/, .git/, node_modules/) to the daemon. This file
+#   excludes non-essential files, making builds faster and images smaller."
+# =============================================================================
+
+# Build outputs (we rebuild inside Docker)
+target/
+*.jar
+*.war
+*.class
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# Git
+.git/
+.gitignore
+
+# Docker files (avoid recursive build)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Documentation
+*.md
+docs/
+LICENSE
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test data
+src/test/

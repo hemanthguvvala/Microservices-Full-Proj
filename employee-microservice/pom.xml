@@ -15,10 +15,13 @@
     <groupId>com.example</groupId>
     <artifactId>employee-service</artifactId>
     <version>1.0.0</version>
+    <!-- Default: JAR (embedded Tomcat, java -jar). Switch to WAR with -Pwar-packaging -->
+    <packaging>${packaging.type}</packaging>
     <name>Employee Microservice</name>
     <description>Employee Management Microservice</description>
 
     <properties>
+        <packaging.type>jar</packaging.type>
         <java.version>17</java.version>
         <spring-cloud.version>2023.0.0</spring-cloud.version>
         <mapstruct.version>1.5.5.Final</mapstruct.version>
@@ -607,4 +610,42 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <!-- =================================================================== -->
+    <!-- Maven Profiles: JAR (default) vs WAR packaging                      -->
+    <!-- Interview: "JAR = embedded Tomcat, runs standalone (java -jar).      -->
+    <!--   WAR = deploys to external Tomcat/WildFly/JBoss. I support both    -->
+    <!--   via Maven profiles. JAR for Docker/K8s, WAR for legacy infra."   -->
+    <!-- =================================================================== -->
+    <profiles>
+        <!-- WAR Packaging Profile — activated with: mvn package -Pwar-packaging -->
+        <profile>
+            <id>war-packaging</id>
+            <properties>
+                <packaging.type>war</packaging.type>
+            </properties>
+            <dependencies>
+                <!-- Mark embedded Tomcat as 'provided' — external server supplies it -->
+                <dependency>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-tomcat</artifactId>
+                    <scope>provided</scope>
+                </dependency>
+            </dependencies>
+            <build>
+                <finalName>${project.artifactId}</finalName>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-war-plugin</artifactId>
+                        <version>3.4.0</version>
+                        <configuration>
+                            <!-- No web.xml needed — Spring Boot uses ServletInitializer -->
+                            <failOnMissingWebXml>false</failOnMissingWebXml>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

@@ -1,4 +1,4 @@
-# Deep-Dive Interview Prep — Security · Resilience4j · Messaging · Threads · SQL · Multi-Cloud
+# Deep-Dive Interview Prep — Security · Resilience4j · Messaging · Threads · SQL · Multi-Cloud · Jenkins/Docker
 
 > Every answer below is grounded in **actual code in this repo**.  
 > File references are given so you can pull up the code during interviews.
@@ -14,8 +14,9 @@
 4. [Threads — @Async, ThreadPool, MDC, Virtual Threads](#4-threads)
 5. [SQL — Window Functions, CTEs, Indexes, Transactions, Locking](#5-sql)
 6. [Multi-Cloud Architecture & Portability — AWS + Azure + GCP](#6-multi-cloud-architecture--portability)
-7. [Mock Interview — Live Q&A Session](#7-mock-interview--live-qa-session)
-8. [Interview Performance Feedback](#8-interview-performance-feedback)
+7. [Jenkins, Docker & JAR/WAR Packaging](#7-jenkins-docker--jarwar-packaging)
+8. [Mock Interview — Live Q&A Session](#8-mock-interview--live-qa-session)
+9. [Interview Performance Feedback](#9-interview-performance-feedback)
 
 ---
 
@@ -1076,7 +1077,145 @@ In the application code:
 
 ---
 
-## 7. Mock Interview — Live Q&A Session
+## 7. Jenkins, Docker & JAR/WAR Packaging
+
+### Q: "Describe your Jenkins pipeline"
+
+**Answer:** Declarative pipeline with 11 stages in a single `Jenkinsfile`:
+
+```
+Checkout → Build (JAR/WAR) → Parallel Tests (Unit + Integration + Frontend)
+→ Code Coverage (JaCoCo 70%) → SonarQube + Quality Gate → Security Scan
+(OWASP + Trivy) → Publish to Nexus → Docker Build & Push → Deploy (K8s or
+Tomcat) → Smoke Tests
+```
+
+Key features:
+- **Parameterized:** `DEPLOY_ENV` (dev/staging/prod), `CLOUD_PROVIDER` (aws/azure/gcp), `PACKAGING` (jar/war)
+- **Parallel testing** cuts pipeline from 15 min → 7 min (unit + integration + frontend run simultaneously)
+- **Quality gates:** If SonarQube fails (`waitForQualityGate`), pipeline aborts before deploy
+- **Automatic rollback:** If K8s rollout fails, `kubectl rollout undo` fires automatically in `post { failure }` block
+- **Slack notifications:** Success/failure with build metadata (version, branch, duration)
+
+**Key file:** `Jenkinsfile` (root of project)
+
+---
+
+### Q: "What's the difference between JAR and WAR?"
+
+| Aspect | JAR | WAR |
+|---|---|---|
+| **What it is** | Fat/uber JAR — application + embedded Tomcat bundled together | Web Archive — application code only, no servlet container |
+| **Server** | Embedded Tomcat (inside the JAR) | External Tomcat / WildFly / JBoss deploys it |
+| **How to run** | `java -jar employee-service.jar` | Copy `.war` to Tomcat's `webapps/` directory |
+| **Dockerfile** | `eclipse-temurin:17-jre-alpine` (250MB) | `tomcat:10.1-jre17-temurin` (400MB) |
+| **Use case** | Cloud-native, Docker, Kubernetes | Legacy enterprise, shared application servers |
+| **Deployment** | Container orchestration (K8s, ECS) | Tomcat Manager API, SCP, Cargo Maven plugin |
+| **Spring Boot config** | Just `main()` method | Needs `ServletInitializer extends SpringBootServletInitializer` |
+| **Tomcat dependency** | `compile` scope (bundled in JAR) | `provided` scope (server supplies it) |
+
+**How we support both:**
+```xml
+<!-- pom.xml — Maven profile switching -->
+<packaging>${packaging.type}</packaging>   <!-- Property, not hardcoded -->
+
+<!-- Default: JAR -->
+<properties>
+    <packaging.type>jar</packaging.type>
+</properties>
+
+<!-- WAR profile: mvn package -Pwar-packaging -->
+<profile>
+    <id>war-packaging</id>
+    <properties>
+        <packaging.type>war</packaging.type>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-tomcat</artifactId>
+            <scope>provided</scope>  <!-- Server provides Tomcat -->
+        </dependency>
+    </dependencies>
+</profile>
+```
+
+**Key files:** `employee-microservice/pom.xml` (profiles section), `ServletInitializer.java`
+
+---
+
+### Q: "Explain your Dockerfile — what's multi-stage build?"
+
+**Answer:**
+```dockerfile
+# Stage 1: BUILD (large image — Maven + JDK, ~800MB)
+FROM maven:3.8.7-eclipse-temurin-17-alpine AS build
+COPY pom.xml .
+RUN mvn dependency:go-offline      # Layer cache — deps don't redownload
+COPY src ./src
+RUN mvn clean package -DskipTests  # Produces fat JAR
+
+# Stage 2: RUNTIME (small image — JRE only, ~250MB)
+FROM eclipse-temurin:17-jre-alpine
+RUN addgroup -S spring && adduser -S spring -G spring  # Non-root
+USER spring:spring
+COPY --from=build /app/target/*.jar app.jar
+HEALTHCHECK CMD wget --spider http://localhost:8081/actuator/health
+ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]
+```
+
+**Why multi-stage?**
+1. **Image size:** 800MB → 250MB (Maven + JDK are discarded after build)
+2. **Security:** No build tools in production image — smaller attack surface
+3. **Layer caching:** `pom.xml` is copied before `src/` — dependencies only re-download when `pom.xml` changes
+4. **Non-root:** Container runs as `spring:spring`, not root — principle of least privilege
+5. **JVM tuning:** `-XX:+UseContainerSupport` makes JVM respect cgroup memory limits (critical for K8s)
+
+---
+
+### Q: "What is .dockerignore and why does it matter?"
+
+Without `.dockerignore`, `docker build` sends the **entire directory** (including `target/`, `.git/`, test files) as build context to the Docker daemon. With it:
+- Build context drops from ~500MB → ~5MB (100× faster)
+- Sensitive files (`.git/`, credentials) never enter the image
+- Cache invalidation is more stable (IDE files don't trigger rebuilds)
+
+---
+
+### Q: "GitHub Actions vs Jenkins — when would you use each?"
+
+| Feature | GitHub Actions | Jenkins |
+|---|---|---|
+| **Hosting** | SaaS (GitHub-managed runners) | Self-hosted (your servers) |
+| **Config** | YAML workflows in `.github/workflows/` | Groovy `Jenkinsfile` in repo root |
+| **Scaling** | Auto-scaled runners | Manual agent provisioning |
+| **Plugins** | Marketplace actions | 1800+ plugins (Nexus, SonarQube, etc.) |
+| **Cost** | Free for public repos | Free but you pay for infrastructure |
+| **Best for** | CI, open source, cloud-native | Enterprise CD, complex approvals, legacy |
+
+**In this project:** GitHub Actions handles CI (14 pipelines — build, test, security scan). Jenkins handles CD to production (Nexus publishing, multi-cloud deploy, approval gates). Both exist because real enterprises often use both.
+
+---
+
+### Jenkins + Docker + JAR/WAR Interview Prep Checklist
+```
+✓ Jenkinsfile declarative pipeline (11 stages, parallel, parameterized)
+✓ JAR vs WAR explanation (embedded vs external Tomcat)
+✓ Maven profile switching (-Pwar-packaging)
+✓ ServletInitializer for WAR deployment
+✓ Multi-stage Docker build (why, layer caching, size reduction)
+✓ Non-root containers, HEALTHCHECK, JVM container support
+✓ .dockerignore purpose and impact
+✓ Docker build targets (jar-runtime vs war-runtime)
+✓ Nexus artifact publishing (releases vs snapshots)
+✓ GitHub Actions vs Jenkins comparison
+✓ SonarQube quality gate in Jenkins (waitForQualityGate)
+✓ Automatic rollback (kubectl rollout undo)
+```
+
+---
+
+## 8. Mock Interview — Live Q&A Session
 
 > All answers below are grounded in actual code files.
 > Use these as rehearsed answers, not scripts — know the code, not the paragraph.
@@ -1283,7 +1422,7 @@ Resolution: run both. Outbox for transaction-critical application events (guaran
 
 ---
 
-## 8. Interview Performance Feedback
+## 9. Interview Performance Feedback
 
 > Received after the 10-question mock session. Use as a calibration baseline.
 
