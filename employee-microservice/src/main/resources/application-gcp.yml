@@ -1,0 +1,53 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# GCP Profile — Spring Cloud GCP Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Activated with: --spring.profiles.active=gcp
+# In K8s (GKE): set SPRING_PROFILES_ACTIVE=gcp in the Deployment env vars
+#
+# Interview: "How does GCP auth differ from AWS/Azure?"
+# → GCP uses Workload Identity: K8s SA → GCP SA binding via annotation.
+#   The GKE metadata server provides tokens automatically.
+#   No secret files, no env vars — cleanest auth model of the three.
+
+spring:
+  cloud:
+    gcp:
+      project-id: ${GCP_PROJECT_ID:employee-platform-prod}
+      credentials:
+        # Workload Identity: auto-detected from GKE metadata server
+        # No service account key file needed
+        encoded-key: ${GCP_CREDENTIALS:}
+
+      # ── Cloud Storage ───────────────────────────────────────────────────────
+      storage:
+        enabled: true
+        project-id: ${GCP_PROJECT_ID:employee-platform-prod}
+
+      # ── Pub/Sub ─────────────────────────────────────────────────────────────
+      pubsub:
+        enabled: true
+        project-id: ${GCP_PROJECT_ID:employee-platform-prod}
+
+      # ── Secret Manager ──────────────────────────────────────────────────────
+      secretmanager:
+        enabled: true
+        project-id: ${GCP_PROJECT_ID:employee-platform-prod}
+
+# ── Custom Cloud Config ───────────────────────────────────────────────────────
+cloud:
+  gcp:
+    storage:
+      bucket: employee-platform-documents-${ENVIRONMENT:dev}
+    pubsub:
+      employee-events-topic: employee-lifecycle-events
+      notification-topic: employee-notifications
+      subscription-suffix: -sub
+    secret-manager:
+      prefix: employee-platform-${ENVIRONMENT:dev}
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  level:
+    com.google.cloud: WARN
+    com.google.cloud.spring: INFO

@@ -89,11 +89,14 @@ PostgreSQL 15 (master + read replica) · MongoDB 7 · Elasticsearch 8.11 · Redi
 ### Observability *(updated)*
 Prometheus · Grafana · OpenTelemetry (micrometer-tracing-bridge-otel + OTLP exporter) · ELK Stack · MDC TaskDecorator · SLO / Error Budget alerting
 
-### Infrastructure
-Docker Compose (21+ services) · Kubernetes (20+ manifests) · Helm Charts · Kustomize · ArgoCD (GitOps) · KEDA (Kafka-lag autoscaling) · Chaos Mesh · Terraform (AWS EKS + RDS + ElastiCache + MSK + ECR + S3 + CloudWatch)
+### Infrastructure & Cloud
+Docker Compose (21+ services) · Kubernetes (20+ manifests) · Helm Charts · Kustomize · ArgoCD (GitOps) · KEDA (Kafka-lag autoscaling) · Chaos Mesh · **Multi-Cloud Terraform:**
+- **AWS** — EKS · RDS · ElastiCache · MSK · ECR · S3 · SQS/SNS · Secrets Manager · CloudWatch · VPC Endpoints (8)
+- **Azure** — AKS · PostgreSQL Flexible · Redis Cache · Event Hubs (Kafka) · ACR · Blob Storage · Key Vault · App Insights · Log Analytics
+- **GCP** — GKE · Cloud SQL · Memorystore · Pub/Sub · Artifact Registry · Cloud Storage · Secret Manager · Cloud Monitoring
 
 ### Security
-Keycloak (OIDC + PKCE) · JWT Bearer · External Secrets Operator · Zero-Trust (IRSA)
+Keycloak (OIDC + PKCE) · JWT Bearer · External Secrets Operator · Zero-Trust (IRSA / Workload Identity / Managed Identity)
 
 ### Frontend
 React 18 · TypeScript 5.3 · Vite · TailwindCSS · Redux Toolkit · React Query · MSW · Storybook · Playwright · useWebSocket hook · NotificationFeed · Angular 17 (Signals)
@@ -102,7 +105,7 @@ React 18 · TypeScript 5.3 · Vite · TailwindCSS · Redux Toolkit · React Quer
 JUnit 5 · Mockito · Testcontainers · JaCoCo · Pact (consumer-driven contracts) · SonarQube · k6 (load tests)
 
 ### CI/CD
-GitHub Actions (8 pipelines) · SonarQube · Docker Build + ECR push · Helm deploy to K8s
+GitHub Actions (12 pipelines) · SonarQube · Multi-cloud deploy (ECR/ACR/Artifact Registry → EKS/AKS/GKE) · Terraform multi-cloud plan/apply · OIDC federation (all 3 clouds)
 
 ---
 
@@ -166,7 +169,7 @@ helm install employee-platform helm/employee-platform/ -f helm/employee-platform
 ## Project Structure
 
 ```
-├── .github/workflows/          # 8 CI/CD pipelines
+├── .github/workflows/          # 12 CI/CD pipelines (incl. multi-cloud deploy)
 ├── analytics-service/          # NEW — gRPC analytics (HTTP:8085, gRPC:9090)
 ├── api-gateway-service/        # Spring Cloud Gateway + Redis KeyResolver
 ├── config-server/              # Spring Cloud Config Server
@@ -181,7 +184,7 @@ helm install employee-platform helm/employee-platform/ -f helm/employee-platform
 ├── helm/                       # Helm charts
 ├── k8s/                        # Kubernetes manifests (20+ files)
 ├── infrastructure/debezium/    # NEW — Debezium CDC connector config
-├── terraform/                  # AWS infrastructure (10 files)
+├── terraform/                  # Multi-cloud IaC (AWS + Azure + GCP, 30+ files)
 ├── monitoring/                 # Prometheus · Grafana · SLO alerts
 ├── pact-tests/                 # Consumer-driven contract tests
 ├── load-tests/                 # k6 load test scripts
@@ -201,8 +204,13 @@ PostgreSQL, MongoDB, Elasticsearch, Redis, Kafka + Zookeeper, all 6 microservice
 ### Kubernetes (Kustomize)
 Namespace, ConfigMaps, Secrets, Ingress, 7 service deployments, PostgreSQL, Redis, Kafka, MongoDB+Elasticsearch, Prometheus+Grafana
 
-### Terraform (AWS)
-VPC (3-AZ), EKS, RDS PostgreSQL (read replica in prod), ElastiCache Redis, MSK Kafka, ECR (7 repos), S3, CloudWatch alarms, IAM/IRSA
+### Terraform — Multi-Cloud IaC
+
+| Cloud | Resources | Files |
+|-------|-----------|-------|
+| **AWS** | VPC (3-AZ) · EKS · RDS (read replica) · ElastiCache · MSK · ECR (7 repos) · S3 · SQS (FIFO+DLQ) · SNS · VPC Endpoints (8) · CloudWatch | 8 |
+| **Azure** | VNet · AKS (Workload Identity) · PostgreSQL Flexible (HA+PgBouncer) · Redis Cache · Event Hubs (Kafka) · ACR (geo-rep) · Blob Storage · Key Vault · App Insights · Log Analytics alerts | 8 |
+| **GCP** | VPC · GKE (Binary Auth) · Cloud SQL (HA) · Memorystore · Pub/Sub (schema+DLT) · Artifact Registry (Docker+Maven) · Cloud Storage · Cloud Monitoring alerts | 8 |
 
 ### Monitoring Stack
 - **Prometheus** → scrapes `/actuator/prometheus` from all services
@@ -224,7 +232,7 @@ VPC (3-AZ), EKS, RDS PostgreSQL (read replica in prod), ElastiCache Redis, MSK K
 | **Security** | JWT + RBAC · Keycloak OIDC/PKCE · Redis Rate Limiting (3 KeyResolver strategies) · External Secrets · Zero-Trust |
 | **Observability** | Prometheus · Grafana · OpenTelemetry (OTLP wired) · ELK · MDC TaskDecorator · SLO / Error Budget |
 | **API Design** | REST · GraphQL · HATEOAS · WebSocket · gRPC · OpenAPI |
-| **DevOps** | Docker · K8s · Helm · Kustomize · ArgoCD (GitOps) · KEDA · Chaos Mesh · Terraform (AWS) |
+| **Cloud & DevOps** | Docker · K8s · Helm · Kustomize · ArgoCD (GitOps) · KEDA · Chaos Mesh · Terraform (AWS + Azure + GCP) · Multi-cloud strategy pattern · OIDC federation |
 | **Testing** | JUnit 5 · Mockito · Testcontainers · Pact (contract) · Playwright (E2E) · k6 (load) · SonarQube |
 | **Distributed Systems** | Distributed Locking · Idempotency Keys · Multi-Tenancy · Feature Flags · Blue-Green Deploy · Canary |
 

@@ -1,0 +1,45 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# AWS Profile — Spring Cloud AWS Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Activated with: --spring.profiles.active=aws
+# In K8s: set SPRING_PROFILES_ACTIVE=aws in the Deployment env vars
+#
+# Interview: "How do you handle cloud-specific config without code changes?"
+# → Spring profiles. Each cloud has its own application-{cloud}.yml.
+#   The K8s deployment sets the active profile via env var.
+#   Application code imports CloudStorageService, not AwsS3StorageService.
+
+spring:
+  cloud:
+    aws:
+      region:
+        static: us-east-1
+      credentials:
+        # IRSA: SDK auto-detects credentials from the service account token
+        # mounted at /var/run/secrets/eks.amazonaws.com/serviceaccount/token
+        use-default-credentials-chain: true
+      s3:
+        enabled: true
+      sqs:
+        enabled: true
+
+# ── S3 Configuration ──────────────────────────────────────────────────────────
+cloud:
+  aws:
+    s3:
+      bucket: employee-platform-documents-${ENVIRONMENT:dev}
+      region: us-east-1
+    sqs:
+      employee-events-queue: employee-lifecycle-events.fifo
+      notification-queue: employee-notifications
+    sns:
+      alert-topic: arn:aws:sns:us-east-1:${AWS_ACCOUNT_ID}:employee-platform-alerts
+    secrets-manager:
+      prefix: employee-platform/${ENVIRONMENT:dev}
+
+# ── Logging with CloudWatch ───────────────────────────────────────────────────
+logging:
+  level:
+    io.awspring.cloud: INFO
+    software.amazon.awssdk: WARN

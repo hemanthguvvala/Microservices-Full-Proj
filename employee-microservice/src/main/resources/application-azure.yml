@@ -1,0 +1,58 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Azure Profile — Spring Cloud Azure Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Activated with: --spring.profiles.active=azure
+# In K8s (AKS): set SPRING_PROFILES_ACTIVE=azure in the Deployment env vars
+#
+# Interview: "How does Azure auth differ from AWS?"
+# → AWS uses IRSA (IAM Roles for Service Accounts).
+#   Azure uses Workload Identity Federation: K8s SA → Federated Credential →
+#   Managed Identity → Azure RBAC. Same concept, different implementation.
+#   Spring Cloud Azure auto-configures from AZURE_CLIENT_ID env var.
+
+spring:
+  cloud:
+    azure:
+      credential:
+        # Workload Identity: auto-detected from pod's federated token
+        managed-identity-enabled: true
+        client-id: ${AZURE_CLIENT_ID:}
+      profile:
+        tenant-id: ${AZURE_TENANT_ID:}
+        subscription-id: ${AZURE_SUBSCRIPTION_ID:}
+
+      # ── Blob Storage ──────────────────────────────────────────────────────
+      storage:
+        blob:
+          account-name: employeeplatform${ENVIRONMENT:dev}
+          endpoint: https://employeeplatform${ENVIRONMENT:dev}.blob.core.windows.net
+          container-name: employee-documents
+
+      # ── Service Bus (JMS) ─────────────────────────────────────────────────
+      servicebus:
+        namespace: employee-platform-${ENVIRONMENT:dev}
+        entity-type: queue
+        pricing-tier: standard
+
+      # ── Key Vault ─────────────────────────────────────────────────────────
+      keyvault:
+        secret:
+          endpoint: https://empplatform-${ENVIRONMENT:dev}.vault.azure.net/
+
+# ── Custom Cloud Config ───────────────────────────────────────────────────────
+cloud:
+  azure:
+    storage:
+      container: employee-documents
+    servicebus:
+      employee-events-queue: employee-lifecycle-events
+      notification-queue: employee-notifications
+    keyvault:
+      name: empplatform-${ENVIRONMENT:dev}
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  level:
+    com.azure: WARN
+    com.azure.spring: INFO

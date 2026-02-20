@@ -28,6 +28,10 @@
         <grpc.version>1.62.2</grpc.version>
         <protobuf.version>3.25.3</protobuf.version>
         <grpc-spring-boot.version>3.1.0.RELEASE</grpc-spring-boot.version>
+        <!-- Cloud SDKs -->
+        <spring-cloud-aws.version>3.1.0</spring-cloud-aws.version>
+        <azure-spring-cloud.version>5.8.0</azure-spring-cloud.version>
+        <spring-cloud-gcp.version>5.0.0</spring-cloud-gcp.version>
     </properties>
 
     <dependencies>
@@ -398,6 +402,70 @@
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-exporter-otlp</artifactId>
             <version>2.1.0</version>
+        </dependency>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             MULTI-CLOUD SDKs — AWS, Azure, GCP
+             Interview: "How do you make services cloud-portable?"
+             → Strategy pattern: CloudStorageService interface with 3 impls
+               (S3, Blob Storage, GCS). Spring profiles activate the right one.
+               Same trick for messaging (SQS vs Service Bus vs Pub/Sub).
+             ═══════════════════════════════════════════════════════════════════ -->
+
+        <!-- AWS: Spring Cloud AWS (S3, SQS, SNS, Secrets Manager, Parameter Store) -->
+        <dependency>
+            <groupId>io.awspring.cloud</groupId>
+            <artifactId>spring-cloud-aws-starter-s3</artifactId>
+            <version>${spring-cloud-aws.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.awspring.cloud</groupId>
+            <artifactId>spring-cloud-aws-starter-sqs</artifactId>
+            <version>${spring-cloud-aws.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.awspring.cloud</groupId>
+            <artifactId>spring-cloud-aws-starter-sns</artifactId>
+            <version>${spring-cloud-aws.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.awspring.cloud</groupId>
+            <artifactId>spring-cloud-aws-starter-secrets-manager</artifactId>
+            <version>${spring-cloud-aws.version}</version>
+        </dependency>
+
+        <!-- Azure: Spring Cloud Azure (Blob, Service Bus, Key Vault, Event Hubs) -->
+        <dependency>
+            <groupId>com.azure.spring</groupId>
+            <artifactId>spring-cloud-azure-starter-storage-blob</artifactId>
+            <version>${azure-spring-cloud.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.azure.spring</groupId>
+            <artifactId>spring-cloud-azure-starter-servicebus-jms</artifactId>
+            <version>${azure-spring-cloud.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.azure.spring</groupId>
+            <artifactId>spring-cloud-azure-starter-keyvault-secrets</artifactId>
+            <version>${azure-spring-cloud.version}</version>
+        </dependency>
+
+        <!-- GCP: Spring Cloud GCP (Cloud Storage, Pub/Sub, Secret Manager) -->
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>spring-cloud-gcp-starter-storage</artifactId>
+            <version>${spring-cloud-gcp.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>spring-cloud-gcp-starter-pubsub</artifactId>
+            <version>${spring-cloud-gcp.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>spring-cloud-gcp-starter-secretmanager</artifactId>
+            <version>${spring-cloud-gcp.version}</version>
         </dependency>
     </dependencies>
 

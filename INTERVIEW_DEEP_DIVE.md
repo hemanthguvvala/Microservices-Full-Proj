@@ -1,4 +1,4 @@
-# Deep-Dive Interview Prep — Security · Resilience4j · Messaging · Threads · SQL
+# Deep-Dive Interview Prep — Security · Resilience4j · Messaging · Threads · SQL · Multi-Cloud
 
 > Every answer below is grounded in **actual code in this repo**.  
 > File references are given so you can pull up the code during interviews.
@@ -13,8 +13,9 @@
 3. [RabbitMQ — Why it's NOT here (and Kafka instead)](#3-rabbitmq-vs-kafka)
 4. [Threads — @Async, ThreadPool, MDC, Virtual Threads](#4-threads)
 5. [SQL — Window Functions, CTEs, Indexes, Transactions, Locking](#5-sql)
-
----
+6. [Multi-Cloud Architecture & Portability — AWS + Azure + GCP](#6-multi-cloud-architecture--portability)
+7. [Mock Interview — Live Q&A Session](#7-mock-interview--live-qa-session)
+8. [Interview Performance Feedback](#8-interview-performance-feedback)
 
 ---
 
@@ -989,7 +990,93 @@ SQL:
 
 ---
 
-## 6. Mock Interview — Live Q&A Session
+## 6. Multi-Cloud Architecture & Portability
+
+### Q: "How does your application support multiple cloud providers?"
+
+**Answer:** Strategy Pattern with Spring Profiles. I defined three abstraction interfaces — `CloudStorageService`, `CloudMessagingService`, `CloudSecretService` — each with 3 implementations activated by `@Profile("aws")`, `@Profile("azure")`, or `@Profile("gcp")`.
+
+```
+@Profile("aws")  → AwsS3StorageService       (S3Client, KMS, pre-signed URLs)
+@Profile("azure")→ AzureBlobStorageService    (BlobServiceClient, SAS tokens)
+@Profile("gcp")  → GcpCloudStorageService     (Google Storage, V4 signed URLs)
+```
+
+The `EmployeeDocumentController` injects `CloudStorageService` — **zero cloud-specific imports** in the controller. To switch clouds, change `SPRING_PROFILES_ACTIVE=aws` to `azure` or `gcp`. No code changes needed.
+
+**Key files:** `cloud/CloudStorageService.java`, `cloud/aws/AwsS3StorageService.java`, `cloud/azure/AzureBlobStorageService.java`, `cloud/gcp/GcpCloudStorageService.java`, `controller/EmployeeDocumentController.java`
+
+---
+
+### Q: "Compare AWS S3 vs Azure Blob Storage vs Google Cloud Storage"
+
+| Feature | AWS S3 | Azure Blob | GCP Cloud Storage |
+|---|---|---|---|
+| **Upload** | `PutObjectRequest` + `S3Client` | `BlobClient.upload()` | `Storage.create(BlobInfo)` |
+| **Pre-signed/SAS** | `S3Presigner.presignGetObject()` | `BlobSasPermission` + `generateSas()` | `V4SignUrl` with `SignUrlOption` |
+| **Encryption** | KMS SSE (`x-amz-server-side-encryption`) | Azure-managed keys (default) | Google-managed keys (default) |
+| **Container concept** | Bucket | Container (within Storage Account) | Bucket |
+| **Lifecycle tiering** | Standard → IA → Glacier | Hot → Cool → Archive | Standard → Nearline → Coldline → Archive |
+
+---
+
+### Q: "How do you handle credentials across clouds without storing secrets in CI/CD?"
+
+**OIDC Workload Identity Federation** — all 3 clouds use keyless authentication:
+
+- **AWS:** GitHub Actions → `AssumeRoleWithWebIdentity` → IRSA (pod-level IAM via ServiceAccount annotation). Zero static access keys.
+- **Azure:** GitHub Actions → Federated Credential → Managed Identity. `AZURE_CLIENT_ID` + `AZURE_TENANT_ID` only (no secret).
+- **GCP:** GitHub Actions → Workload Identity Federation → `google-github-actions/auth`. Service account binding via `iam.workloadIdentityUser`.
+
+In the application code:
+- AWS: IRSA auto-provides credentials to the SDK via `DefaultCredentialsProvider`
+- Azure: `DefaultAzureCredential()` picks up Managed Identity automatically
+- GCP: Workload Identity injects credentials into the pod via projected service account token
+
+---
+
+### Q: "Walk me through your Terraform multi-cloud strategy"
+
+**Structure:** `terraform/` for AWS (8 files), `terraform/azure/` (8 files + env/), `terraform/gcp/` (8 files + env/). Each cloud module is self-contained with its own provider, backend, and variable definitions.
+
+**Consistency across clouds:**
+- Same services (K8s, PostgreSQL, Redis, messaging, registry, storage, monitoring) — cloud-native implementations
+- Same environment strategy: `dev.tfvars` (minimal) vs `prod.tfvars` (HA, zone-redundant, production sizing)
+- Same security posture: private subnets, managed identity for workloads, encryption at rest + in transit
+
+**CI/CD:** `.github/workflows/terraform-multi-cloud.yml` uses a GitHub Actions matrix strategy to run `terraform plan/apply` for all 3 clouds. Path-based change detection ensures only modified cloud modules trigger plans.
+
+---
+
+### Q: "What messaging systems do you use across clouds and how do they compare?"
+
+| Feature | AWS SQS/SNS | Azure Event Hubs | GCP Pub/Sub |
+|---|---|---|---|
+| **Pattern** | Point-to-point (SQS) + Fan-out (SNS→SQS) | Kafka protocol (consumer groups) | Topic + Subscription (push/pull) |
+| **Ordering** | SQS FIFO (MessageGroupId) | Partition-based ordering | Ordering keys |
+| **Dead letter** | DLQ with maxReceiveCount | Capture to Blob Storage | Dead-letter topic + subscription |
+| **Exactly-once** | SQS FIFO + DeduplicationId | Event Hubs partitions (at-least-once) | Exactly-once delivery (native) |
+| **Schema** | No native schema registry | Avro via Schema Registry add-on | Avro schema enforcement (native) |
+
+**Application code:** `CloudMessagingService` interface with `sendMessage(topic, payload, messageGroupId)`. AWS impl uses `SqsTemplate`, Azure uses `JmsTemplate`, GCP uses `PubSubTemplate`. The `messageGroupId` maps to FIFO group (AWS), JMSXGroupID session (Azure), or ordering key (GCP).
+
+---
+
+### Cloud Section Interview Prep Checklist
+```
+✓ Multi-cloud strategy pattern explanation (interface + @Profile)
+✓ S3 vs Blob vs GCS comparison (upload, pre-signed, encryption)
+✓ OIDC federation for all 3 clouds (keyless CI/CD)
+✓ Terraform structure (24 modules, 3 clouds, env/ parity)
+✓ Messaging comparison (SQS FIFO vs Event Hubs vs Pub/Sub)
+✓ Identity: IRSA vs Workload Identity vs Managed Identity
+✓ Cost optimization: Spot (AWS/Azure) vs Preemptible (GCP)
+✓ Monitoring: CloudWatch vs App Insights vs Cloud Monitoring
+```
+
+---
+
+## 7. Mock Interview — Live Q&A Session
 
 > All answers below are grounded in actual code files.
 > Use these as rehearsed answers, not scripts — know the code, not the paragraph.
@@ -1196,7 +1283,7 @@ Resolution: run both. Outbox for transaction-critical application events (guaran
 
 ---
 
-## 7. Interview Performance Feedback
+## 8. Interview Performance Feedback
 
 > Received after the 10-question mock session. Use as a calibration baseline.
 

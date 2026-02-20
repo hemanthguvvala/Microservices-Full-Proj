@@ -1,9 +1,9 @@
 # Full-Stack Microservices Project — Complete Skills & Technologies
 
-> **Total:** 7 Java microservices + React + Angular frontends + BFF + 8-service monitoring stack + CI/CD + Docker + K8s + AWS Terraform
+> **Total:** 7 Java microservices + React + Angular frontends + BFF + 8-service monitoring stack + CI/CD + Docker + K8s + Multi-Cloud Terraform (AWS + Azure + GCP)
 > **Patterns:** 49 design patterns · **Technologies:** 98 · **Backend:** 100+ Java source files | **Frontend:** 70+ TypeScript/React/Angular files | **Infra:** 7 Dockerfiles + 2 Docker Compose
 > **NEW (Feb 2026):** analytics-service (gRPC all 4 modes + Protobuf) · Debezium CDC · OpenTelemetry (OTLP wired) · Event Sourcing Snapshots · MDC TaskDecorator · Redis KeyResolver rate limiting · useWebSocket React hook
-> **Cloud:** 15 K8s manifests + Helm chart + 8 Terraform modules | **SQL:** 4 advanced query files (window functions, CTEs, optimization)
+> **Cloud:** 15 K8s manifests + Helm chart + 24 Terraform modules (AWS 8 + Azure 8 + GCP 8) + 12 Spring Cloud SDK integrations | **SQL:** 4 advanced query files (window functions, CTEs, optimization)
 
 ---
 
@@ -30,7 +30,7 @@
 17. [Documentation & Architecture Decisions](#17-documentation--architecture-decisions)
 18. [Service Map & Port Reference](#18-service-map--port-reference)
 19. [Kubernetes & Container Orchestration](#19-kubernetes--container-orchestration)
-20. [AWS Cloud Infrastructure (Terraform)](#20-aws-cloud-infrastructure-terraform)
+20. [Multi-Cloud Infrastructure (Terraform)](#20-multi-cloud-infrastructure-terraform)
 21. [Advanced SQL & Database Engineering](#21-advanced-sql--database-engineering)
 22. [Interview Summary Table](#22-interview-summary-table)
 
@@ -741,46 +741,92 @@ helm/employee-platform/
 
 ---
 
-## 20. AWS Cloud Infrastructure (Terraform)
+## 20. Multi-Cloud Infrastructure (Terraform)
 
-### Terraform Module Structure (`terraform/`)
+### Multi-Cloud Application Layer (Strategy Pattern)
+```
+employee-microservice/src/.../cloud/
+├── CloudStorageService.java       # Interface: upload, download, delete, presignedUrl
+├── CloudMessagingService.java     # Interface: sendMessage, sendDelayedMessage
+├── CloudSecretService.java        # Interface: getSecret, getSecretVersion
+├── aws/
+│   ├── AwsS3StorageService.java      # @Profile("aws") — S3, KMS, pre-signed URLs
+│   ├── AwsSqsMessagingService.java   # @Profile("aws") — SQS FIFO, dedup, DLQ
+│   └── AwsSecretService.java         # @Profile("aws") — Secrets Manager
+├── azure/
+│   ├── AzureBlobStorageService.java  # @Profile("azure") — Blob, SAS tokens
+│   ├── AzureServiceBusMessagingService.java  # @Profile("azure") — JMS, sessions
+│   └── AzureKeyVaultSecretService.java       # @Profile("azure") — Key Vault
+└── gcp/
+    ├── GcpCloudStorageService.java   # @Profile("gcp") — GCS, V4 signed URLs
+    ├── GcpPubSubMessagingService.java # @Profile("gcp") — Pub/Sub, ordering keys
+    └── GcpSecretService.java         # @Profile("gcp") — Secret Manager
+```
+
+> **Interview:** "How do you handle multi-cloud portability?"
+> → Strategy Pattern with Spring Profiles. The `CloudStorageService` interface has 3 implementations activated by `@Profile("aws")`, `@Profile("azure")`, `@Profile("gcp")`. Controller code is 100% cloud-agnostic — zero cloud imports in `EmployeeDocumentController`. Switch clouds by changing `SPRING_PROFILES_ACTIVE`.
+
+### Terraform Module Structure — All 3 Clouds
 ```
 terraform/
-├── main.tf              # Provider config, S3 backend, data sources
-├── variables.tf         # All input variables with validation
-├── vpc.tf               # VPC, subnets, NAT Gateway, flow logs
-├── eks.tf               # EKS cluster, node groups, IRSA, LB controller
-├── rds.tf               # PostgreSQL RDS (multi-AZ, read replica, Performance Insights)
-├── elasticache-msk.tf   # ElastiCache Redis + MSK Kafka
-├── s3-cloudwatch.tf     # S3 buckets + CloudWatch alarms + SNS alerts
-├── ecr-outputs.tf       # ECR repos + all outputs
-└── env/
-    ├── dev.tfvars        # Dev: t3.medium, 2 nodes, small DBs
-    └── prod.tfvars       # Prod: m5.xlarge, 5 nodes, r6g.large DBs
+├── main.tf                  # AWS — Provider + S3 backend
+├── vpc.tf                   # AWS — VPC, subnets, NAT, flow logs
+├── eks.tf                   # AWS — EKS, IRSA, node groups
+├── rds.tf                   # AWS — RDS PostgreSQL (HA + replica)
+├── elasticache-msk.tf       # AWS — ElastiCache + MSK Kafka
+├── s3-cloudwatch.tf         # AWS — S3 + CloudWatch alarms
+├── vpc-endpoints-sqs.tf     # AWS — 8 VPC Endpoints + SQS queues + SNS
+├── ecr-outputs.tf           # AWS — ECR + outputs
+├── azure/
+│   ├── main.tf              # Provider, VNet, subnets, NSG
+│   ├── aks.tf               # AKS, Workload Identity, node pools
+│   ├── database.tf          # PostgreSQL Flexible (HA, PgBouncer)
+│   ├── cache-messaging.tf   # Redis Cache + Event Hubs (Kafka)
+│   ├── registry-storage.tf  # ACR + Blob Storage
+│   ├── monitoring.tf        # App Insights + KQL alerts
+│   ├── variables.tf / outputs.tf
+│   └── env/ (dev.tfvars, prod.tfvars)
+└── gcp/
+    ├── main.tf              # Provider, VPC, Cloud NAT, firewall
+    ├── gke.tf               # GKE, Binary Auth, Workload Identity
+    ├── cloud-sql.tf         # Cloud SQL PostgreSQL (HA, IAM auth)
+    ├── memorystore-pubsub.tf # Redis + Pub/Sub (schema, DLT)
+    ├── registry-storage.tf  # Artifact Registry + Cloud Storage
+    ├── monitoring.tf        # Cloud Monitoring alerts
+    ├── variables.tf / outputs.tf
+    └── env/ (dev.tfvars, prod.tfvars)
 ```
 
-### AWS Services Used
-| Service | Purpose | Key Features |
-|---|---|---|
-| **VPC** | Network isolation | 3 AZs, public/private subnets, NAT Gateway, flow logs |
-| **EKS** | Managed Kubernetes | v1.28, managed node groups, spot instances, IRSA |
-| **RDS PostgreSQL** | Primary database | Multi-AZ, read replica (CQRS), Performance Insights, gp3 |
-| **ElastiCache** | Redis caching | Replication group, TLS, automatic failover |
-| **MSK** | Managed Kafka | 3 brokers (prod), CloudWatch logging |
-| **ECR** | Container registry | Immutable tags, CVE scanning, lifecycle policy |
-| **S3** | Object storage | Versioning, KMS encryption, lifecycle (→ IA → Glacier) |
-| **CloudWatch** | Monitoring/alerts | RDS CPU, storage, EKS nodes, Redis cache hit rate |
-| **SNS** | Alert notifications | Email alerts for all CloudWatch alarms |
-| **IAM** | Access management | IRSA (pod-level IAM), least privilege policies |
+### Multi-Cloud Service Comparison
+| Capability | AWS | Azure | GCP |
+|---|---|---|---|
+| **Kubernetes** | EKS (IRSA, managed node groups, Spot) | AKS (Workload Identity, Azure CNI, Spot) | GKE (Workload Identity, Binary Auth, Preemptible) |
+| **Database** | RDS PostgreSQL (Multi-AZ, read replica) | PostgreSQL Flexible (Zone-redundant, PgBouncer) | Cloud SQL (Regional HA, IAM auth, Query Insights) |
+| **Cache** | ElastiCache Redis (replication, TLS) | Azure Cache for Redis (TLS, private endpoint) | Memorystore Redis 7.0 (STANDARD_HA, transit encryption) |
+| **Messaging** | MSK Kafka + SQS FIFO + SNS | Event Hubs (Kafka-enabled, auto-inflate) | Pub/Sub (exactly-once, Avro schema, BigQuery export) |
+| **Storage** | S3 (versioning, KMS, lifecycle tiering) | Blob Storage (GRS, versioning, lifecycle) | Cloud Storage (Standard→Nearline→Coldline→Archive) |
+| **Registry** | ECR (immutable tags, CVE scanning) | ACR Premium (geo-replication, retention) | Artifact Registry (cleanup policies, immutable tags) |
+| **Secrets** | Secrets Manager (version support) | Key Vault (managed identity) | Secret Manager (IAM, version support) |
+| **Monitoring** | CloudWatch + SNS alarms | App Insights + KQL log alerts | Cloud Monitoring + uptime checks |
+| **Networking** | VPC (3 AZ, NAT, 8 VPC Endpoints) | VNet (3 subnets, NSG, private endpoints) | VPC (Cloud NAT, Private Services Access) |
+| **Identity** | IRSA (pod→IAM role) | Workload Identity + Managed Identity | Workload Identity (KSA→GSA binding) |
 
-### Infrastructure Patterns
-- **Remote State:** S3 + DynamoDB locking (never local state in production)
-- **IRSA:** Each microservice gets its own IAM role via ServiceAccount annotation
-- **Spot Instances:** Cost optimization for non-critical workloads (up to 90% savings)
-- **Multi-AZ:** VPC subnets, RDS, ElastiCache spread across 3 availability zones
-- **Encryption:** At rest (KMS) + in transit (TLS) for all data stores
-- **Cost Optimization:** Single NAT in dev, one-per-AZ in prod; Spot for non-critical
-- **Environment Parity:** Same Terraform, different tfvars (dev vs prod)
+### Spring Cloud SDK Integration (pom.xml)
+| Cloud | Libraries | Version |
+|---|---|---|
+| **AWS** | spring-cloud-aws-starter-s3, sqs, sns, secretsmanager | 3.1.0 |
+| **Azure** | azure-spring-cloud-starter-storage-blob, servicebus-jms, keyvault-secrets | 5.8.0 |
+| **GCP** | spring-cloud-gcp-starter-storage, pubsub, secretmanager | 5.0.0 |
+
+### Infrastructure Patterns (All Clouds)
+- **Remote State:** S3 backend (AWS) / Azure Blob backend (Azure) / GCS backend (GCP) — all with state locking
+- **Pod Identity:** IRSA (AWS) / Workload Identity + Federated Credential (Azure) / Workload Identity Binding (GCP)
+- **Cost Optimization:** Spot/Preemptible nodes for non-critical; single NAT in dev, per-AZ in prod
+- **Multi-AZ/Zone:** All services deployed across 3 availability zones/regions for HA
+- **Encryption:** At rest + in transit for all data stores (KMS / Azure-managed / Google-managed)
+- **Environment Parity:** Same Terraform modules, different tfvars (dev.tfvars vs prod.tfvars)
+- **OIDC Federation:** Keyless CI/CD auth — no long-lived credentials stored in GitHub Secrets
+- **Private Networking:** VPC Endpoints (AWS) / Private Endpoints (Azure) / Private Services Access (GCP)
 
 ---
 
@@ -818,14 +864,15 @@ sql/
 | Category | Backend (Java) | Frontend (React) | Infrastructure | Cloud & SQL |
 |---|---|---|---|---|
 | **Framework** | Spring Boot 3.2, Spring Cloud 2023 | React 18, Vite 5, TypeScript 5.3 | Docker, nginx, GitHub Actions | Terraform ~5.30, Helm 3 |
-| **Architecture** | 5 microservices, API Gateway, Eureka, Config Server | Component-based SPA, Design System | Multi-stage builds, health checks | EKS, VPC (3 AZ), K8s manifests |
-| **Data** | PostgreSQL (master+replica), MongoDB, Elasticsearch | Redux Toolkit, React Query, Zustand | Redis caching, Flyway migrations | RDS Multi-AZ, ElastiCache, S3 |
-| **Messaging** | Kafka (producer + consumer, idempotent) | WebSocket (STOMP + SockJS) | Zookeeper coordination | MSK (managed Kafka) |
-| **Patterns** | Saga, Outbox, ACL, CQRS, Circuit Breaker | Feature Flags, Design Tokens, API Client | Observability (Prometheus+ELK+Zipkin) | IRSA, Kustomize overlays, HPA |
-| **Security** | JWT + RBAC (3 roles), BCrypt, Spring Security 6 | Protected routes, token refresh queue | CSP headers, SonarQube, Snyk | NetworkPolicies, RLS, KMS encryption |
-| **Resilience** | Resilience4j (4 patterns), Feign fallbacks | Retry, circuit breaker, request dedup | Rate limiting (Gateway + Redis) | PDB, anti-affinity, Spot instances |
+| **Architecture** | 5 microservices, API Gateway, Eureka, Config Server | Component-based SPA, Design System | Multi-stage builds, health checks | EKS + AKS + GKE, multi-cloud VPC/VNet |
+| **Data** | PostgreSQL (master+replica), MongoDB, Elasticsearch | Redux Toolkit, React Query, Zustand | Redis caching, Flyway migrations | RDS + Azure Flex + Cloud SQL, S3/Blob/GCS |
+| **Messaging** | Kafka (producer + consumer, idempotent) | WebSocket (STOMP + SockJS) | Zookeeper coordination | MSK + Event Hubs + Pub/Sub, SQS FIFO |
+| **Patterns** | Saga, Outbox, ACL, CQRS, Circuit Breaker | Feature Flags, Design Tokens, API Client | Observability (Prometheus+ELK+Zipkin) | Strategy Pattern (cloud abstraction), Kustomize |
+| **Security** | JWT + RBAC (3 roles), BCrypt, Spring Security 6 | Protected routes, token refresh queue | CSP headers, SonarQube, Snyk | IRSA + Workload Identity + Managed Identity, OIDC federation |
+| **Resilience** | Resilience4j (4 patterns), Feign fallbacks | Retry, circuit breaker, request dedup | Rate limiting (Gateway + Redis) | PDB, anti-affinity, Spot/Preemptible, zone-redundant HA |
 | **Testing** | JUnit 5, Mockito, MockMvc, @DataJpaTest, Testcontainers | Jest, RTL, Playwright (3 browsers), MSW | JaCoCo 70%, Jest 80%, Codecov | EXPLAIN ANALYZE, index strategies |
 | **SQL** | JPA, Flyway, @Query, Native Queries | — | — | Window functions, CTEs, partitioning, triggers, RLS |
+| **Cloud SDK** | Spring Cloud AWS 3.1, Azure 5.8, GCP 5.0 | — | 12 CI/CD pipelines (multi-cloud deploy) | 24 Terraform modules + 4 OIDC pipelines |
 | **Docs** | 6 ADRs, OpenAPI/Swagger, Runbook | Storybook, SKILLS.md | Architecture diagrams | Terraform outputs, Helm values |
 
 ---

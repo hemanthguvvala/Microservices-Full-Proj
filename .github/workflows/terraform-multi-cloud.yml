@@ -1,0 +1,250 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Multi-Cloud Terraform Plan & Apply
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Interview: "How do you manage Terraform across multiple clouds?"
+# → Separate state files per cloud (S3/GCS/Azure Blob backend).
+#   Shared variable naming conventions. Matrix strategy in GitHub Actions
+#   to plan all clouds in parallel, apply sequentially with approvals.
+#   Each cloud directory is an independent Terraform root module.
+
+name: Terraform Multi-Cloud
+
+on:
+  pull_request:
+    paths:
+      - 'terraform/**'
+  push:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+  workflow_dispatch:
+    inputs:
+      cloud:
+        description: 'Target cloud provider'
+        required: true
+        type: choice
+        options:
+          - all
+          - aws
+          - azure
+          - gcp
+      action:
+        description: 'Terraform action'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  TF_VERSION: '1.6.6'
+
+jobs:
+  # ── Detect Changed Cloud Directories ───────────────────────────────────
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      aws: ${{ steps.changes.outputs.aws }}
+      azure: ${{ steps.changes.outputs.azure }}
+      gcp: ${{ steps.changes.outputs.gcp }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            aws:
+              - 'terraform/*.tf'
+              - 'terraform/env/**'
+            azure:
+              - 'terraform/azure/**'
+            gcp:
+              - 'terraform/gcp/**'
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # AWS TERRAFORM
+  # ══════════════════════════════════════════════════════════════════════════
+  terraform-aws:
+    name: AWS Terraform
+    needs: detect-changes
+    if: needs.detect-changes.outputs.aws == 'true' || github.event.inputs.cloud == 'aws' || github.event.inputs.cloud == 'all'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-terraform
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init (AWS)
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: terraform
+        run: terraform validate
+
+      - name: Terraform Plan (AWS)
+        working-directory: terraform
+        run: |
+          terraform plan \
+            -var-file=env/dev.tfvars \
+            -out=aws.tfplan \
+            -no-color 2>&1 | tee plan-output.txt
+
+      - name: Comment PR with plan
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('terraform/plan-output.txt', 'utf8');
+            const truncated = plan.length > 60000 ? plan.substring(0, 60000) + '\n... truncated' : plan;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### AWS Terraform Plan\n\`\`\`hcl\n${truncated}\n\`\`\``
+            });
+
+      - name: Terraform Apply (AWS)
+        if: github.ref == 'refs/heads/main' && (github.event.inputs.action == 'apply' || github.event_name == 'push')
+        working-directory: terraform
+        run: terraform apply aws.tfplan
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # AZURE TERRAFORM
+  # ══════════════════════════════════════════════════════════════════════════
+  terraform-azure:
+    name: Azure Terraform
+    needs: detect-changes
+    if: needs.detect-changes.outputs.azure == 'true' || github.event.inputs.cloud == 'azure' || github.event.inputs.cloud == 'all'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init (Azure)
+        working-directory: terraform/azure
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: terraform/azure
+        run: terraform validate
+
+      - name: Terraform Plan (Azure)
+        working-directory: terraform/azure
+        run: |
+          terraform plan \
+            -var-file=env/dev.tfvars \
+            -var="db_admin_password=${{ secrets.AZURE_DB_PASSWORD }}" \
+            -out=azure.tfplan \
+            -no-color 2>&1 | tee plan-output.txt
+
+      - name: Comment PR with plan
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('terraform/azure/plan-output.txt', 'utf8');
+            const truncated = plan.length > 60000 ? plan.substring(0, 60000) + '\n... truncated' : plan;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### Azure Terraform Plan\n\`\`\`hcl\n${truncated}\n\`\`\``
+            });
+
+      - name: Terraform Apply (Azure)
+        if: github.ref == 'refs/heads/main' && (github.event.inputs.action == 'apply' || github.event_name == 'push')
+        working-directory: terraform/azure
+        run: terraform apply azure.tfplan
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # GCP TERRAFORM
+  # ══════════════════════════════════════════════════════════════════════════
+  terraform-gcp:
+    name: GCP Terraform
+    needs: detect-changes
+    if: needs.detect-changes.outputs.gcp == 'true' || github.event.inputs.cloud == 'gcp' || github.event.inputs.cloud == 'all'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-actions@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init (GCP)
+        working-directory: terraform/gcp
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: terraform/gcp
+        run: terraform validate
+
+      - name: Terraform Plan (GCP)
+        working-directory: terraform/gcp
+        run: |
+          terraform plan \
+            -var-file=env/dev.tfvars \
+            -var="db_admin_password=${{ secrets.GCP_DB_PASSWORD }}" \
+            -out=gcp.tfplan \
+            -no-color 2>&1 | tee plan-output.txt
+
+      - name: Comment PR with plan
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('terraform/gcp/plan-output.txt', 'utf8');
+            const truncated = plan.length > 60000 ? plan.substring(0, 60000) + '\n... truncated' : plan;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### GCP Terraform Plan\n\`\`\`hcl\n${truncated}\n\`\`\``
+            });
+
+      - name: Terraform Apply (GCP)
+        if: github.ref == 'refs/heads/main' && (github.event.inputs.action == 'apply' || github.event_name == 'push')
+        working-directory: terraform/gcp
+        run: terraform apply gcp.tfplan
