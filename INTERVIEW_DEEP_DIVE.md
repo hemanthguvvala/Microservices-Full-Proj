@@ -7,11 +7,123 @@
 
 ## TABLE OF CONTENTS
 
+0. [Tell Me About Your Project — Domain, Role, Team, Architecture](#0-tell-me-about-your-project)
 1. [Spring Security — JWT + Role-Based Auth](#1-spring-security)
 2. [Circuit Breaker — Resilience4j (all 4 modules)](#2-resilience4j-circuit-breaker)
 3. [RabbitMQ — Why it's NOT here (and Kafka instead)](#3-rabbitmq-vs-kafka)
 4. [Threads — @Async, ThreadPool, MDC, Virtual Threads](#4-threads)
 5. [SQL — Window Functions, CTEs, Indexes, Transactions, Locking](#5-sql)
+
+---
+
+---
+
+## 0. Tell Me About Your Project
+
+### Q: "Walk me through what your project does."
+
+**30-second version (use this to open):**
+
+> "We built an **enterprise Employee Management Platform** — an internal HR system that handles the full employee lifecycle: hiring, payroll, notifications, and analytics. It's a distributed system with 7 microservices written in Java Spring Boot, two frontends (React and Angular), and full DevOps infrastructure including Kubernetes, GitOps with ArgoCD, and Chaos Engineering. My role was Lead Product Engineer on a team of 4."
+
+**2-minute deep version (if they ask to elaborate):**
+
+> "The domain is internal HR / workforce management. The platform covers:
+> - **Employee records** — onboarding, CRUD, department management, multi-tenancy
+> - **Payroll processing** — salary calculations, batch payroll runs, audit trail
+> - **Notifications** — real-time alerts via WebSocket (in-app), email, and SMS based on employee events (hired, promoted, etc.)
+> - **Analytics** — aggregate metrics on headcount, salary trends, department stats, queried via gRPC
+>
+> The reason we built it distributed rather than monolithic was to practice real enterprise patterns: each service can be deployed, scaled, and failed independently. For example, a payroll batch job failing doesn't affect real-time notifications."
+
+---
+
+### Q: "What was your role?"
+
+**Answer:**
+
+> "I was the **Lead Product Engineer**. That meant I was responsible for the overall technical architecture — making the build vs. buy decisions, choosing the tech stack, and designing the cross-cutting concerns like observability, security, and inter-service communication.
+>
+> On the code side, I personally built the core services: the employee-service (Event Sourcing, CQRS, Saga orchestration, Outbox pattern), the API Gateway (Redis rate limiting with three KeyResolver strategies), and the analytics-service (all four gRPC streaming modes with Protobuf). I also drove the platform decisions like replacing Zipkin with OpenTelemetry, adding Debezium CDC on top of the polling Outbox, and wiring MDC context propagation for distributed log correlation.
+>
+> Beyond coding, I was the one writing the ADRs (Architecture Decision Records) — documenting *why* we made each choice, not just *what* we chose. That's important because in a distributed system, the wrong choice made early is very expensive to unwind."
+
+---
+
+### Q: "Team size and how did you split the work?"
+
+**Answer:**
+
+> "Four engineers total:
+>
+> - **Me (Lead Product Engineer)** — overall architecture, employee-service, API gateway, analytics-service, gRPC design, Kafka/CDC pipeline, CI/CD, Kubernetes manifests
+> - **Engineer 2** — payroll-service (Feign clients, circuit breakers, batch processing), BFF aggregation layer, Angular frontend
+> - **Engineer 3** — notification-service (GraphQL, strategy pattern, WebSocket/STOMP), React frontend, Redux Toolkit
+> - **Engineer 4** — infrastructure: Terraform, Helm charts, ArgoCD GitOps, monitoring stack (Prometheus/Grafana/ELK), Keycloak, Chaos Mesh experiments
+>
+> We used GitHub for version control, trunk-based development with short-lived feature branches, and had a Config Server so each service could pick up configuration changes without a redeployment. We held weekly architecture reviews where anyone could propose a design change via an ADR."
+
+---
+
+### Q: "Describe the architecture at a high level."
+
+**Answer:**
+
+> "Three tiers:
+>
+> **Client tier** — React 18 (TypeScript, Vite, TailwindCSS) for employees and managers; Angular 17 (Signals, RxJS) for HR admins. Both communicate via HTTPS and WebSocket.
+>
+> **Service tier** — everything goes through an **API Gateway** (Spring Cloud Gateway on WebFlux) which handles JWT validation, Redis-based rate limiting, and routing. Behind the gateway sit four domain services: employee, payroll, notification, and analytics. Service discovery is via **Eureka**. Config is centralized via **Spring Cloud Config Server** (backed by a Git repo). Services communicate **synchronously** via REST (OpenFeign) for queries, **gRPC** for analytics (lower latency, typed contracts), and **asynchronously** via **Kafka** for events — hired, updated, terminated events fan out to payroll and notifications.
+>
+> **Data tier** — each service owns its data (Database-per-Service pattern). Employee uses **PostgreSQL** with Redis for caching. Payroll has a read replica for reporting. Notification writes audit logs to **MongoDB**. Analytics uses **Elasticsearch** for read queries (CQRS read model). **Debezium** watches the PostgreSQL WAL and publishes DB changes to Kafka as a second CDC channel alongside the Outbox pattern for guaranteed delivery.
+>
+> Cross-cutting: **OpenTelemetry** (OTLP) for distributed tracing and metrics, **ELK** for log aggregation, **Prometheus + Grafana** with SLO / Error Budget alerting. All deployed on **Kubernetes** with **Helm** charts, **ArgoCD** for GitOps, and **KEDA** for event-driven autoscaling (scale notification workers based on Kafka lag)."
+
+---
+
+### Q: "What was the hardest technical problem you solved?"
+
+**Pick one of these based on the interviewer's domain:**
+
+**If they care about distributed systems:**
+> "The trickiest problem was making the Outbox pattern reliable without sacrificing observability. We had a transactional outbox where employee state changes and their outbox event were written in one DB transaction. But we were using a polling publisher that introduced ~5s of latency and put load on PostgreSQL from constant `SELECT FOR UPDATE SKIP LOCKED` queries. I added Debezium CDC on top — it reads the PostgreSQL WAL directly using the `pgoutput` replication plugin, which gives sub-second latency and zero polling load. We now have dual ingestion: Debezium for speed, polling as a fallback. The tricky part was the init container pattern — Debezium needs the replication slot to exist before the connector starts, so we run a Kubernetes init container that creates the slot if it doesn't exist."
+
+**If they care about performance:**
+> "The API Gateway needed to rate-limit differently for different client types — anonymous users get 10 req/s by IP, authenticated users get 100 req/s by JWT subject, partner integrations get 1000 req/s by API key. Spring Cloud Gateway's `RequestRateLimiter` only supports one `KeyResolver` globally. I implemented three separate `KeyResolver` beans (IP-based, JWT-based, API-key-based) with a composite resolver that inspects the request and delegates to the appropriate strategy. Combined with Redis as the backing store for sliding window counters, this gives us per-identity rate limiting across all Gateway instances without sticky sessions."
+
+**If they care about observability:**
+> "We had a subtle MDC context propagation bug. Every HTTP request got a `correlationId` in the MDC, but whenever a service method used `@Async` for things like sending a Kafka event or triggering a notification, the async thread had an empty MDC — so you couldn't correlate async log lines back to the originating request. The fix was a `TaskDecorator` on the `ThreadPoolTaskExecutor`. It captures the full MDC map from the calling thread before submitting the task, and restores it on the worker thread before the task runs, then clears it in a `finally` block — critical because thread pools reuse threads and you don't want one request's context leaking into the next."
+
+---
+
+### Q: "Why microservices and not a monolith?"
+
+> "Honestly, for a team of four, a **modular monolith** would have been faster to ship initially. Microservices have real overhead: network calls, distributed transactions, independent deployments, and operational complexity. We chose microservices deliberately because the goal was to demonstrate production-grade patterns — Saga for distributed transactions, CQRS for read/write separation, Event Sourcing for auditability. These patterns exist specifically to solve microservices problems, so you need the distributed context to justify them.
+>
+> If this were a real product at day zero, I'd start with a modular monolith with clean domain boundaries — same modules, same package structure — but deployable as one unit. Then extract services when you hit a real scaling or team autonomy bottleneck. 'Strangler Fig' pattern. Microservices are a destination, not a starting point."
+
+---
+
+### Resume / Profile Bullets for This
+
+```
+• Led technical architecture for a 7-microservice Employee Management Platform
+  as Lead Product Engineer on a 4-person engineering team
+
+• Designed and implemented event-driven architecture using Apache Kafka, Debezium
+  CDC (PostgreSQL WAL), Transactional Outbox, Saga orchestration, and CQRS with
+  Elasticsearch read model — achieving sub-second event propagation
+
+• Built analytics-service with all four gRPC streaming modes (Unary/Server-stream/
+  Client-stream/Bidirectional) using Protocol Buffers; integrated Resilience4j
+  circuit breaker with fallback for graceful degradation when analytics unavailable
+
+• Replaced Zipkin with OpenTelemetry (OTLP) end-to-end, wired MDC TaskDecorator
+  for async trace propagation, and established SLO/Error Budget alerting in Grafana
+
+• Deployed platform on Kubernetes using Helm + ArgoCD (GitOps), KEDA for
+  Kafka-lag-based autoscaling, Chaos Mesh for fault injection testing
+```
 
 ---
 
