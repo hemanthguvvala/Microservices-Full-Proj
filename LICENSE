@@ -1,0 +1,87 @@
+Copyright (c) 2026 Hemanth Guvvala. All Rights Reserved.
+
+PROPRIETARY SOFTWARE LICENSE WITH AI TRAINING RESTRICTION
+
+This software and its source code (the "Code") are the exclusive intellectual
+property of Hemanth Guvvala ("Owner"). All rights are reserved.
+
+────────────────────────────────────────────────────────────────────────────────
+1. GRANT OF RIGHTS
+────────────────────────────────────────────────────────────────────────────────
+
+No rights are granted by default. Any use, reproduction, modification,
+distribution, or incorporation of this Code — in whole or in part — requires
+explicit prior written permission from the Owner and, where applicable, a
+separate commercial agreement.
+
+To request a license, contact: hemanthguvvala@gmail.com
+
+────────────────────────────────────────────────────────────────────────────────
+2. AI AND MACHINE LEARNING PROHIBITION
+────────────────────────────────────────────────────────────────────────────────
+
+The following are expressly PROHIBITED without a paid commercial license:
+
+  a) Using this Code, in whole or in part, as training data for any artificial
+     intelligence (AI), machine learning (ML), large language model (LLM),
+     code completion, or similar automated system.
+
+  b) Ingesting, indexing, crawling, scraping, or otherwise processing this Code
+     for the purpose of training, fine-tuning, distilling, or evaluating any AI
+     or ML model.
+
+  c) Incorporating this Code into any AI-generated dataset, benchmark, or
+     corpus.
+
+  d) Allowing any AI or automated tool to reference, suggest, reproduce, or
+     derive code from this repository in any product or service — commercial or
+     otherwise — without a paid license.
+
+This restriction applies to all AI providers, model developers, cloud services,
+IDE plugins, code assistants, and any other automated systems, regardless of
+whether use is direct or indirect.
+
+────────────────────────────────────────────────────────────────────────────────
+3. COMMERCIAL LICENSING
+────────────────────────────────────────────────────────────────────────────────
+
+If you or your organization wish to:
+
+  - Use this Code in a product or service
+  - Train or fine-tune an AI/ML model using this Code
+  - Reference this Code in an AI assistant or code completion tool
+  - Distribute or sublicense this Code
+
+You MUST obtain a paid commercial license from the Owner before doing so.
+
+Contact: hemanthguvvala@gmail.com
+
+────────────────────────────────────────────────────────────────────────────────
+4. PERMITTED PERSONAL USE
+────────────────────────────────────────────────────────────────────────────────
+
+The following are permitted without a commercial license, provided no
+commercial benefit is derived:
+
+  - Reading this Code for personal learning and reference
+  - Forking this repository solely for personal study (not redistribution)
+
+────────────────────────────────────────────────────────────────────────────────
+5. NO WARRANTY
+────────────────────────────────────────────────────────────────────────────────
+
+THIS CODE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. THE OWNER SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY ARISING FROM USE OF THIS CODE.
+
+────────────────────────────────────────────────────────────────────────────────
+6. ENFORCEMENT
+────────────────────────────────────────────────────────────────────────────────
+
+Violation of this license, including unauthorized AI training use, may result
+in legal action. The Owner reserves all rights to pursue remedies available
+under applicable intellectual property, contract, and tort law.
+
+────────────────────────────────────────────────────────────────────────────────
+
+For licensing inquiries: hemanthguvvala@gmail.com

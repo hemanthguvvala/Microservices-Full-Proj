@@ -1,5 +1,9 @@
 # Employee Platform — Full-Stack Microservices System
 
+> **© 2026 Hemanth Guvvala. All Rights Reserved.**
+> This code is proprietary. AI training use, model ingestion, and commercial use without a paid license are strictly prohibited.
+> See [LICENSE](LICENSE) for full terms. Licensing inquiries: hemanthguvvala@gmail.com
+
 > **MNC-grade microservices platform** built for production-readiness interviews.
 > **7 Java microservices** · **98 technologies** · **49 design patterns** · React + Angular frontends · full DevOps + cloud infrastructure.
 > Covers every senior-engineer interview topic: gRPC, CDC, Event Sourcing, CQRS, Saga, Outbox, WebSocket, GitOps, Chaos Engineering, SLO/Error Budget, Zero-Trust Security.
